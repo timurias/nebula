@@ -62,6 +62,7 @@ const getInitialState = (): GameState => {
     targetedCell: null,
     allocationMode: null,
     selectedResource: null,
+    hoveredCell: null,
   }
 };
 
@@ -522,27 +523,38 @@ export const useNebulaClash = () => {
   }, []);
 
   const finishPlacing = useCallback(() => {
-    const playerShips = identifyShips(gameState.player.board);
-    if(playerShips.length === 0){
-        toast({title: "No Ships Placed", description: "You must place at least one ship part.", variant: "destructive"});
-        return;
-    }
-
-    const newPlayerState = {...gameState.player, identifiedShips: playerShips};
-    const newAiState = placeAllShipsRandomly(gameState.ai, gameState.settings.boardSize);
+    let toastInfo: { title: string; description?: string; variant?: "destructive" } | null = null;
+    let finalState: GameState | null = null;
     
-    setGameState(prev => ({
-        ...prev,
-        phase: "playing",
-        placingShips: false,
-        ai: newAiState,
-        player: newPlayerState,
-        message: "All ships placed! Your turn to attack.",
-        selectedCellType: null,
-        turn: 'human',
-    }));
-    toast({ title: "Fleet Deployed!", description: "Your ships are in position. Time to attack." });
-  }, [gameState.player, gameState.ai, gameState.settings.boardSize, placeAllShipsRandomly, toast]);
+    setGameState(prev => {
+      const playerShips = identifyShips(prev.player.board);
+      if(playerShips.length === 0){
+          toastInfo = {title: "No Ships Placed", description: "You must place at least one ship part.", variant: "destructive"};
+          return prev;
+      }
+
+      const newPlayerState = {...prev.player, identifiedShips: playerShips};
+      const newAiState = placeAllShipsRandomly(prev.ai, prev.settings.boardSize);
+      
+      finalState = {
+          ...prev,
+          phase: "playing",
+          placingShips: false,
+          ai: newAiState,
+          player: newPlayerState,
+          message: "All ships placed! Your turn to attack.",
+          selectedCellType: null,
+          turn: 'human',
+      };
+      return finalState;
+    });
+
+    if (toastInfo) {
+      toast(toastInfo);
+    } else {
+      toast({ title: "Fleet Deployed!", description: "Your ships are in position. Time to attack." });
+    }
+  }, [placeAllShipsRandomly, toast]);
   
   const placeShipsRandomly = useCallback(() => {
     setIsPlacingRandomly(true);
@@ -601,18 +613,14 @@ export const useNebulaClash = () => {
 
                 if (allocationMode === 'energy') {
                     if (targetCellState.ship && targetCellState.ship.type !== CellType.Simple && targetCellState.ship.type !== CellType.Energy) {
-                        // De-energize previously powered cell if any
-                        for(const bRow of newBoard) {
+                        // Unpower all components that were powered by this source
+                         for(const bRow of newBoard) {
                             for(const bCell of bRow) {
-                                if(bCell.ship?.powering === sourceCellState.ship.id) {
+                                if(bCell.ship?.id === sourceCellState.ship.id) {
                                     bCell.ship.powering = null;
                                 }
                             }
                         }
-
-                        // Unpower all components that were powered by this source
-                        const poweredComponents = newBoard.flat().filter((c: CellState) => c.ship?.powering === sourceCellState.ship.id);
-                        poweredComponents.forEach((c: CellState) => c.ship!.powering = null);
                         
                         sourceCellState.ship.powering = targetCellState.ship.id;
                         localToast = { title: "Component Energized", description: `${targetCellState.ship.type} is now powered.` };
@@ -756,6 +764,11 @@ export const useNebulaClash = () => {
   const toggleDebugMode = useCallback(() => {
     setGameState(prev => ({ ...prev, debug: !prev.debug }));
   }, []);
+
+  const setHoveredCell = useCallback((cell: {row: number, col: number} | null) => {
+    setGameState(prev => ({...prev, hoveredCell: cell}));
+  }, []);
+
 
   useEffect(() => {
     if (gameState.turn === 'human' && gameState.turnNumber > 0) {
@@ -956,5 +969,5 @@ export const useNebulaClash = () => {
   }, [gameState.turn, gameState.phase, gameState.winner, executeAITurn]);
 
 
-  return { gameState, startGame, selectCellType, handleCellClick, resetGame, placeShipsRandomly, isPlacingRandomly, finishPlacing, toggleDebugMode, endTurn, cancelAllocation };
+  return { gameState, startGame, selectCellType, handleCellClick, resetGame, placeShipsRandomly, isPlacingRandomly, finishPlacing, toggleDebugMode, endTurn, cancelAllocation, setHoveredCell };
 };

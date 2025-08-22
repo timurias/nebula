@@ -37,6 +37,7 @@ export default function Home() {
     toggleDebugMode,
     endTurn,
     cancelAllocation,
+    setHoveredCell,
   } = useNebulaClash();
 
   if (gameState.phase === "setup") {
@@ -167,6 +168,8 @@ export default function Home() {
                 selectedWeaponId={gameState.selectedWeaponId}
                 allocationMode={gameState.allocationMode}
                 selectedResource={gameState.selectedResource}
+                hoveredCell={gameState.hoveredCell}
+                setHoveredCell={setHoveredCell}
               />
             </CardContent>
           </Card>
@@ -181,6 +184,8 @@ export default function Home() {
                 onCellClick={(row, col) => handleCellClick(row, col, 'ai')}
                 isPlayerBoard={false}
                 debug={gameState.debug}
+                hoveredCell={null}
+                setHoveredCell={() => {}}
               />
             </CardContent>
           </Card>

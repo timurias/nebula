@@ -119,6 +119,5 @@ export interface GameState {
   targetedCell: {row: number, col: number} | null;
   allocationMode: 'energy' | 'ammo' | null;
   selectedResource: {row: number, col: number} | null;
+  hoveredCell: {row: number, col: number} | null;
 }
-
-    

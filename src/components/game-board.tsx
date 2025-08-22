@@ -1,7 +1,8 @@
 
 "use client";
 
-import { Board, CellType, IdentifiedShip, WEAPON_TYPES, WEAPON_SPECS } from "@/types";
+import { useState } from 'react';
+import { Board, CellType, IdentifiedShip, WEAPON_TYPES, WEAPON_SPECS, ShipCell } from "@/types";
 import { cn } from "@/lib/utils";
 import { IconAmmo, IconMedical, IconStructure, IconEnergy, IconWeapon1x1, IconWeapon3x3, IconWeapon5x5 } from "./icons";
 import { Flame, X, ShieldQuestion, Wrench, Zap, Power, Fuel } from "lucide-react";
@@ -21,6 +22,8 @@ interface GameBoardProps {
   selectedWeaponId?: string | null;
   allocationMode?: 'energy' | 'ammo' | null;
   selectedResource?: { row: number, col: number } | null;
+  setHoveredCell: (cell: {row: number, col: number} | null) => void;
+  hoveredCell: {row: number, col: number} | null;
 }
 
 const cellTypeIcons: Record<string, React.ElementType> = {
@@ -78,7 +81,18 @@ const getPoweredComponentEnergySourcesCount = (board: Board, componentId: string
     return count;
 };
 
-export default function GameBoard({ board, ships, onCellClick, isPlayerBoard, debug = false, selectedWeaponId, allocationMode, selectedResource }: GameBoardProps) {
+const findCellById = (board: Board, id: string): { row: number, col: number } | null => {
+    for (let r = 0; r < board.length; r++) {
+        for (let c = 0; c < board[r].length; c++) {
+            if (board[r][c].ship?.id === id) {
+                return { row: r, col: c };
+            }
+        }
+    }
+    return null;
+}
+
+export default function GameBoard({ board, ships, onCellClick, isPlayerBoard, debug = false, selectedWeaponId, allocationMode, selectedResource, hoveredCell, setHoveredCell }: GameBoardProps) {
   const boardSize = board.length;
 
   const canReceiveEnergy = (cellType: CellType) => {
@@ -90,11 +104,16 @@ export default function GameBoard({ board, ships, onCellClick, isPlayerBoard, de
     return WEAPON_TYPES.includes(cellType) && energySources > 0;
   }
 
+  const poweredCellCoords = hoveredCell && board[hoveredCell.row][hoveredCell.col].ship?.powering
+    ? findCellById(board, board[hoveredCell.row][hoveredCell.col].ship!.powering!)
+    : null;
+
   return (
     <TooltipProvider>
       <div
         className="grid gap-0.5 aspect-square"
         style={{ gridTemplateColumns: `repeat(${boardSize}, minmax(0, 1fr))` }}
+        onMouseLeave={() => setHoveredCell(null)}
       >
         {board.map((row, rowIndex) =>
           row.map((cell, colIndex) => {
@@ -129,11 +148,13 @@ export default function GameBoard({ board, ships, onCellClick, isPlayerBoard, de
               }
             }
 
+            const isPoweredByHovered = poweredCellCoords && poweredCellCoords.row === rowIndex && poweredCellCoords.col === colIndex;
 
             const cellContent = (
               <button
                 key={`${rowIndex}-${colIndex}`}
                 onClick={() => onCellClick(rowIndex, colIndex)}
+                onMouseEnter={() => setHoveredCell({row: rowIndex, col: colIndex})}
                 disabled={!isPlayerBoard && (cell.isHit || cell.isMiss)}
                 className={cn(
                   "relative flex items-center justify-center aspect-square transition-all duration-200",
@@ -144,6 +165,8 @@ export default function GameBoard({ board, ships, onCellClick, isPlayerBoard, de
                   isAllocationTarget && "bg-green-500/30 hover:bg-green-500/50",
                   cell.animation === "hit" && "hit-animation",
                   cell.animation === "miss" && "miss-animation",
+                  isPoweredByHovered && "ring-2 ring-orange-400 ring-offset-2 ring-offset-background z-10",
+                  cell.ship?.type === CellType.Energy && cell.ship.powering && "bg-green-900/50",
                   isPlayerBoard ? "cursor-pointer" : "cursor-crosshair",
                   (!isPlayerBoard && (cell.isHit || cell.isMiss)) && 'cursor-not-allowed'
                 )}
