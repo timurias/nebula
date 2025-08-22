@@ -1,7 +1,7 @@
 
 "use client";
 
-import { Board, CellType, IdentifiedShip, WEAPON_TYPES } from "@/types";
+import { Board, CellType, IdentifiedShip, WEAPON_TYPES, WEAPON_SPECS } from "@/types";
 import { cn } from "@/lib/utils";
 import { IconAmmo, IconMedical, IconStructure, IconEnergy, IconWeapon1x1, IconWeapon3x3, IconWeapon5x5 } from "./icons";
 import { Flame, X, ShieldQuestion, Wrench, Zap, Power, Fuel } from "lucide-react";
@@ -133,9 +133,9 @@ export default function GameBoard({ board, ships, onCellClick, isPlayerBoard, de
                   </div>
                 )}
                 
-                {(isPlayerBoard || debug) && cell.ship && !cell.isHit && (
+                {(isPlayerBoard || debug) && cell.ship && !cell.isHit && Icon && (
                   <>
-                  {Icon && <Icon className={cn("w-2/3 h-2/3", isPlayerBoard ? "text-primary-foreground/80" : "text-accent-foreground/50")} />}
+                  <Icon className={cn("w-2/3 h-2/3", isPlayerBoard ? "text-primary-foreground/80" : "text-accent-foreground/50")} />
                   
                   {cell.ship.type === CellType.Energy && !cell.ship.usedThisTurn && isPlayerBoard && (
                     <Power className="absolute top-0.5 right-0.5 w-3 h-3 text-yellow-400" />
@@ -214,3 +214,5 @@ export default function GameBoard({ board, ships, onCellClick, isPlayerBoard, de
     </TooltipProvider>
   );
 }
+
+    
