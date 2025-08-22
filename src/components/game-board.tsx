@@ -87,6 +87,7 @@ export default function GameBoard({ board, ships, onCellClick, isPlayerBoard, de
       >
         {board.map((row, rowIndex) =>
           row.map((cell, colIndex) => {
+            if (!cell) return null;
             const Icon = cell.ship ? cellTypeIcons[cell.ship.type] : null;
             const borderClasses = (isPlayerBoard || debug) ? getBorderClasses(rowIndex, colIndex, ships) : "";
             const isSelectedWeapon = isPlayerBoard && selectedWeaponId === cell.ship?.id;
@@ -214,5 +215,3 @@ export default function GameBoard({ board, ships, onCellClick, isPlayerBoard, de
     </TooltipProvider>
   );
 }
-
-    

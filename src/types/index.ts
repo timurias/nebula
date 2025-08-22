@@ -37,6 +37,7 @@ export interface ShipCell {
   ammoCharge?: number;
   isEnergized?: boolean;
   usedThisTurn?: boolean;
+  powering?: string | null; // For energy cells, string is JSON.stringify({row, col}) of target
 }
 
 export type CellState = {

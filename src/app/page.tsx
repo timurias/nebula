@@ -23,7 +23,6 @@ export default function Home() {
     isPlacingRandomly,
     finishPlacing,
     toggleDebugMode,
-    chargeWeapon,
     endTurn,
     cancelAllocation,
   } = useNebulaClash();
@@ -56,9 +55,8 @@ export default function Home() {
        )
     }
 
-    const availableEnergy = gameState.player.identifiedShips.flatMap(s => s.cells).filter(c => gameState.player.board[c.row][c.col].ship?.type === CellType.Energy && !gameState.player.board[c.row][c.col].ship?.usedThisTurn).length;
-    const availableAmmo = gameState.player.identifiedShips.flatMap(s => s.cells).filter(c => gameState.player.board[c.row][c.col].ship?.type === CellType.Ammo && !gameState.player.board[c.row][c.col].ship?.usedThisTurn && gameState.player.board[c.row][c.col].ship?.isEnergized).length;
-
+    const availableEnergy = gameState.player.board.flat().filter(c => c.ship?.type === CellType.Energy && !c.ship.usedThisTurn && !c.isHit).length;
+    const availableAmmo = gameState.player.board.flat().filter(c => c.ship?.type === CellType.Ammo && !c.ship.usedThisTurn && c.ship.isEnergized && !c.isHit).length;
 
     return (
       <div className="flex flex-col gap-4">
