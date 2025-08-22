@@ -90,4 +90,5 @@ export interface GameState {
   } | null;
   attacksRemaining: number;
   turnNumber: number;
+  debug: boolean;
 }

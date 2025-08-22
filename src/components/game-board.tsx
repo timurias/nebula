@@ -17,6 +17,7 @@ interface GameBoardProps {
   ships: IdentifiedShip[];
   onCellClick: (row: number, col: number) => void;
   isPlayerBoard: boolean;
+  debug?: boolean;
 }
 
 const cellTypeIcons: Record<CellType, React.ElementType> = {
@@ -57,7 +58,7 @@ const getBorderClasses = (row: number, col: number, ships: IdentifiedShip[]) => 
   return classes.join(" ");
 }
 
-export default function GameBoard({ board, ships, onCellClick, isPlayerBoard }: GameBoardProps) {
+export default function GameBoard({ board, ships, onCellClick, isPlayerBoard, debug = false }: GameBoardProps) {
   const boardSize = board.length;
 
   return (
@@ -69,7 +70,7 @@ export default function GameBoard({ board, ships, onCellClick, isPlayerBoard }: 
         {board.map((row, rowIndex) =>
           row.map((cell, colIndex) => {
             const Icon = cell.ship ? cellTypeIcons[cell.ship.type] : null;
-            const borderClasses = isPlayerBoard ? getBorderClasses(rowIndex, colIndex, ships) : "";
+            const borderClasses = (isPlayerBoard || debug) ? getBorderClasses(rowIndex, colIndex, ships) : "";
 
             const cellContent = (
               <button
@@ -98,9 +99,9 @@ export default function GameBoard({ board, ships, onCellClick, isPlayerBoard }: 
                   </div>
                 )}
                 
-                {isPlayerBoard && cell.ship && !cell.isHit && (
+                {(isPlayerBoard || debug) && cell.ship && !cell.isHit && (
                   <>
-                  <Icon className="w-2/3 h-2/3 text-primary-foreground/80" />
+                  <Icon className={cn("w-2/3 h-2/3", isPlayerBoard ? "text-primary-foreground/80" : "text-accent-foreground/50")} />
                   {cell.repairTurnsLeft && cell.repairTurnsLeft > 0 && (
                       <div className="absolute inset-0 flex items-center justify-center bg-blue-500/50">
                           <Wrench className="w-1/2 h-1/2 text-white animate-spin" style={{ animationDuration: '3s' }} />

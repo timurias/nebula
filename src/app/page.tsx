@@ -7,7 +7,7 @@ import SetupDialog from "@/components/setup-dialog";
 import ShipPlacementPanel from "@/components/ship-placement-panel";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Rocket, Dices, RotateCcw, CheckSquare, Target } from "lucide-react";
+import { Rocket, Dices, RotateCcw, CheckSquare, Target, Bug } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
 export default function Home() {
@@ -20,6 +20,7 @@ export default function Home() {
     placeShipsRandomly,
     isPlacingRandomly,
     finishPlacing,
+    toggleDebugMode,
   } = useNebulaClash();
 
   if (gameState.phase === "setup") {
@@ -71,6 +72,7 @@ export default function Home() {
                 ships={gameState.ai.identifiedShips}
                 onCellClick={(row, col) => handleCellClick(row, col, 'ai')}
                 isPlayerBoard={false}
+                debug={gameState.debug}
               />
             </CardContent>
           </Card>
@@ -155,6 +157,10 @@ export default function Home() {
                     </div>
                 </div>
               </div>
+               <Button onClick={toggleDebugMode} variant="outline" size="sm">
+                <Bug className="mr-2 h-4 w-4" />
+                Toggle Debug
+              </Button>
             </CardContent>
           </Card>
         </div>
