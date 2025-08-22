@@ -35,9 +35,8 @@ export interface ShipCell {
   id: string; // Unique ID for each cell
   shipId?: number;
   ammoCharge?: number;
-  isEnergized?: boolean;
   usedThisTurn?: boolean;
-  powering?: string | null; // For energy cells, string is JSON.stringify({row, col}) of target
+  powering?: string | null; // For energy cells, string is component's ShipCell ID
 }
 
 export type CellState = {
@@ -121,3 +120,5 @@ export interface GameState {
   allocationMode: 'energy' | 'ammo' | null;
   selectedResource: {row: number, col: number} | null;
 }
+
+    

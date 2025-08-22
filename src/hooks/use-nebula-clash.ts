@@ -150,6 +150,18 @@ const identifyShips = (board: Board): IdentifiedShip[] => {
     return ships;
 };
 
+const getPoweredComponentEnergySources = (board: Board, componentId: string): ShipCell[] => {
+    const sources: ShipCell[] = [];
+    for (const row of board) {
+        for (const cell of row) {
+            if (cell.ship?.type === CellType.Energy && cell.ship.powering === componentId) {
+                sources.push(cell.ship);
+            }
+        }
+    }
+    return sources;
+};
+
 
 export const useNebulaClash = () => {
   const [gameState, setGameState] = useState<GameState>(getInitialState);
@@ -196,8 +208,8 @@ export const useNebulaClash = () => {
             if (ship.isSunk) return;
 
             let availableRepairs = ship.medicalBays.filter(m => {
-                const cell = findCellByShipId(newBoard, m.id);
-                return cell?.ship?.isEnergized;
+                const poweredBy = getPoweredComponentEnergySources(newBoard, m.id);
+                return poweredBy.length > 0;
             }).length;
             
             const cellsCurrentlyRepairing = ship.cells.filter(c => newBoard[c.row][c.col].repairTurnsLeft).length;
@@ -229,11 +241,8 @@ export const useNebulaClash = () => {
         for(const row of newAiBoard) {
             for(const cell of row) {
                 if(cell.ship) {
-                    if (cell.ship.type === CellType.Energy) {
-                       cell.ship.powering = null;
-                    } else if (cell.ship.type !== CellType.Simple) {
-                       cell.ship.isEnergized = false;
-                    }
+                   cell.ship.powering = null;
+                   cell.ship.usedThisTurn = false;
                 }
             }
         }
@@ -276,6 +285,9 @@ export const useNebulaClash = () => {
   }
   
   const handleAttack = useCallback((attacker: Player, targetCell: {row: number, col: number}) => {
+    let toastInfo: { title: string; description?: string; variant?: "destructive" } | null = null;
+    let isValidAttack = false;
+
     setGameState(prev => {
       const isHumanAttack = attacker === 'human';
       const targetPlayerKey = isHumanAttack ? 'ai' : 'player';
@@ -285,7 +297,7 @@ export const useNebulaClash = () => {
       
       const weaponId = prev.selectedWeaponId;
       if (isHumanAttack && !weaponId) {
-        toast({title: "No Weapon Selected", description: "Select a weapon before attacking.", variant: "destructive"});
+        toastInfo = {title: "No Weapon Selected", description: "Select a weapon before attacking.", variant: "destructive"};
         return prev;
       }
       
@@ -295,18 +307,21 @@ export const useNebulaClash = () => {
       if(!weaponCell || !weaponCell.ship || !WEAPON_TYPES.includes(weaponCell.ship.type)) {
           return prev;
       }
-
-      if(!weaponCell.ship.isEnergized){
-          toast({title: "Weapon Not Energized", description: "This weapon has no power.", variant: "destructive"});
-          return prev;
-      }
-
+      
       const weaponSpec = WEAPON_SPECS[weaponCell.ship.type as keyof typeof WEAPON_SPECS];
-      if ((weaponCell.ship.ammoCharge || 0) < weaponSpec.ammoCost) {
-          toast({title: "Not enough ammo!", description: "This weapon is not fully charged.", variant: "destructive"});
+      const energySources = getPoweredComponentEnergySources(attackerState.board, weaponCell.ship.id);
+
+      if(energySources.length < weaponSpec.energyCost){
+          toastInfo = {title: "Weapon Not Energized", description: `This weapon needs ${weaponSpec.energyCost} energy but only has ${energySources.length}.`, variant: "destructive"};
           return prev;
       }
 
+      if ((weaponCell.ship.ammoCharge || 0) < weaponSpec.ammoCost) {
+          toastInfo = {title: "Not enough ammo!", description: "This weapon is not fully charged.", variant: "destructive"};
+          return prev;
+      }
+
+      isValidAttack = true;
       const targetState = prev[targetPlayerKey];
       const newBoard = JSON.parse(JSON.stringify(targetState.board));
       
@@ -336,9 +351,17 @@ export const useNebulaClash = () => {
       });
       
       const newAttackerBoard = JSON.parse(JSON.stringify(attackerState.board));
-      const firedWeaponCell = findCellByShipId(newAttackerBoard, weaponId!);
-      if(firedWeaponCell?.ship) {
-          firedWeaponCell.ship.ammoCharge = 0;
+      const firedWeaponCell = findCellByShipId(newAttackerBoard, weaponId!)!;
+      firedWeaponCell.ship!.ammoCharge = 0;
+      
+      // Mark energy sources as used
+      const energySourceIds = energySources.map(s => s.id);
+      for(const row of newAttackerBoard) {
+          for(const cell of row) {
+              if(cell.ship && energySourceIds.includes(cell.ship.id)) {
+                  cell.ship.usedThisTurn = true;
+              }
+          }
       }
 
       let updatedState: GameState = { ...prev };
@@ -395,6 +418,10 @@ export const useNebulaClash = () => {
   
       return updatedState;
     });
+
+    if (!isValidAttack && toastInfo) {
+      toast(toastInfo);
+    }
   }, [toast, checkWinner]);
 
   const getSmartMove = useCallback(async (board: Board, size: number, aiMemory: GameState['aiMemory'], difficulty: Difficulty, turnNumber: number) => {
@@ -411,7 +438,7 @@ export const useNebulaClash = () => {
     return { move };
   }, []);
     
-  const placeShipCell = useCallback((row: number, col: number) => {
+  const placeShipCell = (row: number, col: number) => {
     let canPlace = true;
     let toastInfo: { title: string; description?: string; variant?: "destructive" } | null = null;
     
@@ -446,7 +473,7 @@ export const useNebulaClash = () => {
     if (!canPlace && toastInfo) {
         toast(toastInfo);
     }
-  }, [toast]);
+  };
   
   const placeAllShipsRandomly = useCallback((playerState: PlayerState, boardSize: BoardSize) => {
     let newState = { 
@@ -521,7 +548,7 @@ export const useNebulaClash = () => {
     }, 500);
   }, [placeAllShipsRandomly, finishPlacing]);
   
-  const handleCellClick = useCallback((row: number, col: number, boardOwner: Player) => {
+  const handleCellClick = (row: number, col: number, boardOwner: Player) => {
     const { phase, turn, placingShips, selectedWeaponId, allocationMode, selectedResource, player } = gameState;
     let toastInfo: { title: string; description?: string; variant?: "destructive" } | null = null;
 
@@ -548,34 +575,46 @@ export const useNebulaClash = () => {
             const newBoard = JSON.parse(JSON.stringify(prev.player.board));
             const sourceCellState = newBoard[selectedResource.row][selectedResource.col];
             const targetCellState = newBoard[row][col];
+            let allocationSuccessful = false;
 
             if (allocationMode === 'energy') {
                 if (targetCellState.ship && targetCellState.ship.type !== CellType.Simple && targetCellState.ship.type !== CellType.Energy) {
                     // De-energize previously powered cell if any
-                    if (sourceCellState.ship.powering) {
-                        const oldTargetCoords = JSON.parse(sourceCellState.ship.powering);
-                        newBoard[oldTargetCoords.row][oldTargetCoords.col].ship.isEnergized = false;
+                    const oldTargetId = sourceCellState.ship.powering;
+                    if(oldTargetId) {
+                       const oldTargetCell = findCellByShipId(newBoard, oldTargetId);
+                       if(oldTargetCell?.ship) oldTargetCell.ship.powering = null;
                     }
-                    
-                    // Energize new cell
-                    targetCellState.ship.isEnergized = true;
-                    sourceCellState.ship.powering = JSON.stringify({row, col});
+                    sourceCellState.ship.powering = targetCellState.ship.id;
                     toastInfo = { title: "Component Energized", description: `${targetCellState.ship.type} is now powered.` };
+                    allocationSuccessful = true;
                 }
             } else if (allocationMode === 'ammo') {
                 if (targetCellState.ship && WEAPON_TYPES.includes(targetCellState.ship.type)) {
                     const weaponSpec = WEAPON_SPECS[targetCellState.ship.type];
                     const currentCharge = targetCellState.ship.ammoCharge || 0;
-                    if (currentCharge < weaponSpec.ammoCost) {
+                    const poweredBy = getPoweredComponentEnergySources(newBoard, sourceCellState.ship.id);
+
+                    if (poweredBy.length === 0) {
+                       toastInfo = { title: "Ammo bay not energized", variant: "destructive" };
+                    } else if (currentCharge < weaponSpec.ammoCost) {
                         targetCellState.ship.ammoCharge = currentCharge + 1;
                         sourceCellState.ship.usedThisTurn = true;
+                        poweredBy.forEach(energySource => {
+                            const energyCell = findCellByShipId(newBoard, energySource.id);
+                            if(energyCell?.ship) energyCell.ship.usedThisTurn = true;
+                        })
                         toastInfo = { title: "Weapon Charged", description: `Charged ${targetCellState.ship.type} by 1.` };
+                        allocationSuccessful = true;
                     } else {
                         toastInfo = { title: "Weapon Fully Charged", variant: "destructive" };
                     }
                 }
             }
-            return { ...prev, player: { ...prev.player, board: newBoard, identifiedShips: identifyShips(newBoard) }, allocationMode: null, selectedResource: null };
+            if (allocationSuccessful) {
+              return { ...prev, player: { ...prev.player, board: newBoard, identifiedShips: identifyShips(newBoard) }, allocationMode: null, selectedResource: null };
+            }
+            return { ...prev, allocationMode: null, selectedResource: null };
         });
       } else { // Not in allocation mode, select a resource or weapon
         switch (clickedCell.ship.type) {
@@ -591,7 +630,7 @@ export const useNebulaClash = () => {
           case CellType.Ammo:
             if (clickedCell.ship.usedThisTurn) {
               toastInfo = { title: "Ammo Used", description: "This ammo cell has already been used this turn." };
-            } else if (!clickedCell.ship.isEnergized) {
+            } else if (getPoweredComponentEnergySources(player.board, clickedCell.ship.id).length === 0) {
               toastInfo = { title: "Not Energized", description: "This ammo producer has no power.", variant: "destructive" };
             } else {
               toastInfo = { title: "Ammo Allocation", description: "Select a weapon to charge." };
@@ -602,8 +641,10 @@ export const useNebulaClash = () => {
           default:
             if (WEAPON_TYPES.includes(clickedCell.ship.type)) {
               const weaponSpec = WEAPON_SPECS[clickedCell.ship.type];
-              if (!clickedCell.ship.isEnergized) {
-                toastInfo = { title: "Weapon Not Energized", description: "This weapon has no power.", variant: "destructive" };
+              const energySources = getPoweredComponentEnergySources(player.board, clickedCell.ship.id);
+
+              if (energySources.length < weaponSpec.energyCost) {
+                toastInfo = { title: "Weapon Not Energized", description: `This weapon needs ${weaponSpec.energyCost} energy but only has ${energySources.length}.`, variant: "destructive" };
               } else if ((clickedCell.ship.ammoCharge || 0) >= weaponSpec.ammoCost) {
                 toastInfo = { title: "Weapon Selected", description: "Target an enemy cell to fire." };
                 setGameState(prev => ({ ...prev, selectedWeaponId: clickedCell.ship!.id, allocationMode: null, selectedResource: null }));
@@ -618,7 +659,7 @@ export const useNebulaClash = () => {
     if(toastInfo) {
         toast(toastInfo);
     }
-  }, [gameState, placeShipCell, handleAttack, toast]);
+  };
   
   const cancelAllocation = useCallback(() => {
     setGameState(prev => ({
@@ -666,7 +707,7 @@ export const useNebulaClash = () => {
     });
   }, [toast]);
   
-  const selectCellType = useCallback((cellType: CellType) => {
+  const selectCellType = (cellType: CellType) => {
     let canSelect = true;
     let toastInfo: { title: string; description?: string; variant?: "destructive" } | null = null;
     setGameState((prev) => {
@@ -682,7 +723,7 @@ export const useNebulaClash = () => {
     if (!canSelect && toastInfo) {
       toast(toastInfo);
     }
-  }, [toast]);
+  };
 
   const toggleDebugMode = useCallback(() => {
     setGameState(prev => ({ ...prev, debug: !prev.debug }));
@@ -738,29 +779,60 @@ export const useNebulaClash = () => {
 
     // AI Resource Management
     // Energize
-    const energyProducers = newBoard.flat().filter((c: CellState) => c.ship?.type === CellType.Energy && !c.ship?.isHit).map((c: CellState) => c.ship!.id);
-    const consumers = newBoard.flat().filter((c: CellState) => c.ship && c.ship.type !== CellType.Energy && c.ship.type !== CellType.Simple && !c.ship?.isHit && !c.ship.isEnergized).map((c: CellState) => c.ship!.id);
+    const energyProducers = newBoard.flat().filter((c: CellState) => c.ship?.type === CellType.Energy && !c.ship?.isHit && !c.ship.usedThisTurn).map((c: CellState) => c.ship!.id);
+    const consumers = newBoard.flat().filter((c: CellState) => c.ship && c.ship.type !== CellType.Energy && c.ship.type !== CellType.Simple && !c.ship?.isHit).map((c: CellState) => c.ship!);
     
     for(const producerId of energyProducers) {
-        if(consumers.length > 0) {
-            const consumerId = consumers.shift()!;
-            const producerCell = findCellByShipId(newBoard, producerId)!;
-            const consumerCell = findCellByShipId(newBoard, consumerId)!;
-            consumerCell.ship!.isEnergized = true;
+        const producerCell = findCellByShipId(newBoard, producerId)!;
+        let poweredSomething = false;
+        for (const consumer of consumers) {
+            const consumerCell = findCellByShipId(newBoard, consumer.id)!;
+            const poweredBy = getPoweredComponentEnergySources(newBoard, consumer.id);
+
+            if(consumer.type === CellType.Medical) { // Prioritize medical
+                if(poweredBy.length < 1) {
+                    producerCell.ship!.powering = consumer.id;
+                    poweredSomething = true;
+                    break;
+                }
+            } else if (consumer.type === CellType.Ammo) { // Then ammo
+                if(poweredBy.length < 1) {
+                    producerCell.ship!.powering = consumer.id;
+                    poweredSomething = true;
+                    break;
+                }
+            } else if (WEAPON_TYPES.includes(consumer.type)) { // Then weapons
+                const spec = WEAPON_SPECS[consumer.type];
+                if(poweredBy.length < spec.energyCost) {
+                    producerCell.ship!.powering = consumer.id;
+                    poweredSomething = true;
+                    break;
+                }
+            }
         }
     }
 
     // Charge weapons
-    const ammoProducers = newBoard.flat().filter((c: CellState) => c.ship?.type === CellType.Ammo && c.ship.isEnergized && !c.ship?.isHit);
-    let availableAmmo = ammoProducers.length;
-    for(const row of newBoard) {
-        for(const cell of row) {
-            if(cell.ship && WEAPON_TYPES.includes(cell.ship.type) && cell.ship.isEnergized) {
-                const spec = WEAPON_SPECS[cell.ship.type];
-                const needed = spec.ammoCost - (cell.ship.ammoCharge || 0);
-                const chargeAmount = Math.min(availableAmmo, needed);
-                cell.ship.ammoCharge = (cell.ship.ammoCharge || 0) + chargeAmount;
-                availableAmmo -= chargeAmount;
+    const ammoProducers = newBoard.flat().filter((c: CellState) => c.ship?.type === CellType.Ammo && !c.ship?.isHit && !c.ship.usedThisTurn);
+    for(const ammoProducerCell of ammoProducers) {
+        if(getPoweredComponentEnergySources(newBoard, ammoProducerCell.ship!.id).length < 1) continue;
+
+        for(const row of newBoard) {
+            for(const cell of row) {
+                if(cell.ship && WEAPON_TYPES.includes(cell.ship.type)) {
+                    const spec = WEAPON_SPECS[cell.ship.type];
+                    if((cell.ship.ammoCharge || 0) < spec.ammoCost) {
+                        cell.ship.ammoCharge = (cell.ship.ammoCharge || 0) + 1;
+                        ammoProducerCell.ship!.usedThisTurn = true;
+                        
+                        const energySources = getPoweredComponentEnergySources(newBoard, ammoProducerCell.ship!.id);
+                        energySources.forEach(source => {
+                            const energyCell = findCellByShipId(newBoard, source.id);
+                            if(energyCell?.ship) energyCell.ship.usedThisTurn = true;
+                        });
+                        break; 
+                    }
+                }
             }
         }
     }
@@ -771,7 +843,12 @@ export const useNebulaClash = () => {
 
     // AI Attack
     const readyWeapons = newBoard.flat()
-        .filter((c: CellState) => c.ship && WEAPON_TYPES.includes(c.ship.type) && c.ship.isEnergized && (c.ship.ammoCharge || 0) >= WEAPON_SPECS[c.ship.type].ammoCost)
+        .filter((c: CellState) => {
+            if (!c.ship || !WEAPON_TYPES.includes(c.ship.type) || c.isHit) return false;
+            const spec = WEAPON_SPECS[c.ship.type];
+            const energySources = getPoweredComponentEnergySources(newBoard, c.ship.id);
+            return energySources.length >= spec.energyCost && (c.ship.ammoCharge || 0) >= spec.ammoCost;
+        })
         .map((c: CellState) => c.ship!);
         
     for (const weapon of readyWeapons) {
@@ -797,8 +874,8 @@ export const useNebulaClash = () => {
       newAIShips.forEach(ship => {
           if (ship.isSunk) return;
           let availableRepairs = ship.medicalBays.filter(m => {
-              const cell = findCellByShipId(newAIBoard, m.id);
-              return cell?.ship?.isEnergized && !cell?.isHit;
+              const poweredBy = getPoweredComponentEnergySources(newAIBoard, m.id);
+              return poweredBy.length > 0 && !m.isHit;
           }).length;
           const cellsCurrentlyRepairing = ship.cells.filter(c => newAIBoard[c.row][c.col].repairTurnsLeft).length;
           availableRepairs -= cellsCurrentlyRepairing;
@@ -853,3 +930,5 @@ export const useNebulaClash = () => {
 
   return { gameState, startGame, selectCellType, handleCellClick, resetGame, placeShipsRandomly, isPlacingRandomly, finishPlacing, toggleDebugMode, endTurn, cancelAllocation };
 };
+
+    

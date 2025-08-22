@@ -68,15 +68,28 @@ const isResourceConsumer = (cellType: CellType) => {
     return cellType !== CellType.Simple && cellType !== CellType.Energy;
 }
 
+const getPoweredComponentEnergySourcesCount = (board: Board, componentId: string): number => {
+    let count = 0;
+    for (const row of board) {
+        for (const cell of row) {
+            if (cell.ship?.type === CellType.Energy && cell.ship.powering === componentId) {
+                count++;
+            }
+        }
+    }
+    return count;
+};
+
 export default function GameBoard({ board, ships, onCellClick, isPlayerBoard, debug = false, selectedWeaponId, allocationMode, selectedResource }: GameBoardProps) {
   const boardSize = board.length;
 
-  const canReceiveEnergy = (cellType: CellType, isEnergized: boolean | undefined) => {
-    return isResourceConsumer(cellType) && !isEnergized;
+  const canReceiveEnergy = (cellType: CellType) => {
+    return isResourceConsumer(cellType);
   }
   
-  const canReceiveAmmo = (cellType: CellType) => {
-    return WEAPON_TYPES.includes(cellType);
+  const canReceiveAmmo = (cellType: CellType, board: Board, componentId: string) => {
+    const energySources = getPoweredComponentEnergySourcesCount(board, componentId);
+    return WEAPON_TYPES.includes(cellType) && energySources > 0;
   }
 
   return (
@@ -87,18 +100,30 @@ export default function GameBoard({ board, ships, onCellClick, isPlayerBoard, de
       >
         {board.map((row, rowIndex) =>
           row.map((cell, colIndex) => {
-            if (!cell) return null;
+            if (!cell || !cell.ship) return null;
             const Icon = cell.ship ? cellTypeIcons[cell.ship.type] : null;
             const borderClasses = (isPlayerBoard || debug) ? getBorderClasses(rowIndex, colIndex, ships) : "";
             const isSelectedWeapon = isPlayerBoard && selectedWeaponId === cell.ship?.id;
             const isSelectedResource = isPlayerBoard && selectedResource?.row === rowIndex && selectedResource?.col === colIndex;
+            
+            const energySources = getPoweredComponentEnergySourcesCount(board, cell.ship.id);
+            let isEnergized = false;
+            if(isResourceConsumer(cell.ship.type)) {
+                if(WEAPON_TYPES.includes(cell.ship.type)) {
+                    const spec = WEAPON_SPECS[cell.ship.type];
+                    isEnergized = energySources >= spec.energyCost;
+                } else {
+                    isEnergized = energySources >= 1;
+                }
+            }
+
 
             let isAllocationTarget = false;
             if (isPlayerBoard && allocationMode && cell.ship) {
-              if (allocationMode === 'energy' && canReceiveEnergy(cell.ship.type, cell.ship.isEnergized)) {
+              if (allocationMode === 'energy' && canReceiveEnergy(cell.ship.type)) {
                 isAllocationTarget = true;
               }
-              if (allocationMode === 'ammo' && canReceiveAmmo(cell.ship.type)) {
+              if (allocationMode === 'ammo' && canReceiveAmmo(cell.ship.type, board, cell.ship.id)) {
                 isAllocationTarget = true;
               }
             }
@@ -142,15 +167,15 @@ export default function GameBoard({ board, ships, onCellClick, isPlayerBoard, de
                     <Power className="absolute top-0.5 right-0.5 w-3 h-3 text-yellow-400" />
                   )}
 
-                  {cell.ship.type === CellType.Ammo && !cell.ship.usedThisTurn && cell.ship.isEnergized && isPlayerBoard && (
+                  {cell.ship.type === CellType.Ammo && !cell.ship.usedThisTurn && isEnergized && isPlayerBoard && (
                     <Fuel className="absolute top-0.5 right-0.5 w-3 h-3 text-orange-400" />
                   )}
 
-                  {cell.ship.isEnergized && cell.ship.type !== CellType.Energy && (
+                  {isEnergized && cell.ship.type !== CellType.Energy && (
                     <Zap className="absolute bottom-0.5 right-0.5 w-3 h-3 text-yellow-400" />
                   )}
 
-                  {cell.ship.isEnergized === false && isResourceConsumer(cell.ship.type) && (
+                  {!isEnergized && isResourceConsumer(cell.ship.type) && (
                     <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
                       <Zap className="w-1/2 h-1/2 text-muted-foreground/50" />
                     </div>
@@ -182,14 +207,14 @@ export default function GameBoard({ board, ships, onCellClick, isPlayerBoard, de
             if(isPlayerBoard && cell.ship && !cell.isHit) {
                 if(cell.repairTurnsLeft && cell.repairTurnsLeft > 0) {
                     tooltipContent = `Repairing... ${cell.repairTurnsLeft} turns left.`;
-                } else if (cell.ship.isEnergized === false && isResourceConsumer(cell.ship.type)) {
+                } else if (!isEnergized && isResourceConsumer(cell.ship.type)) {
                     tooltipContent = "Not energized. Click an energy cell, then this cell to power it.";
                 } else if (WEAPON_TYPES.includes(cell.ship.type)) {
-                    const spec = WEAPON_TYPES.includes(cell.ship.type) ? WEAPON_SPECS[cell.ship.type] : null;
-                    tooltipContent = `Ammo: ${cell.ship.ammoCharge || 0}${spec ? `/${spec.ammoCost}`: ''}. Click an ammo cell, then this cell to charge it.`;
+                    const spec = WEAPON_SPECS[cell.ship.type];
+                    tooltipContent = `Ammo: ${cell.ship.ammoCharge || 0}/${spec.ammoCost}. Energy: ${energySources}/${spec.energyCost}. Click an ammo cell, then this cell to charge it.`;
                 } else if (cell.ship.type === CellType.Energy && !cell.ship.usedThisTurn) {
                     tooltipContent = "Energy producer. Click to select, then click a component to power it.";
-                } else if (cell.ship.type === CellType.Ammo && cell.ship.isEnergized && !cell.ship.usedThisTurn) {
+                } else if (cell.ship.type === CellType.Ammo && isEnergized && !cell.ship.usedThisTurn) {
                     tooltipContent = "Ammo producer. Click to select, then click a weapon to charge it.";
                 } else if (cell.ship.usedThisTurn) {
                     tooltipContent = "This resource has been used this turn."
@@ -215,3 +240,5 @@ export default function GameBoard({ board, ships, onCellClick, isPlayerBoard, de
     </TooltipProvider>
   );
 }
+
+    

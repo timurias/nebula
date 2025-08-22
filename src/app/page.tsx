@@ -10,7 +10,19 @@ import { Button } from "@/components/ui/button";
 import { Rocket, Dices, RotateCcw, CheckSquare, Target, Bug, Zap, Bomb, Power, Fuel } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { CellType, WEAPON_SPECS } from "@/types";
+import { CellType, WEAPON_SPECS, Board } from "@/types";
+
+const getPoweredComponentEnergySourcesCount = (board: Board, componentId: string): number => {
+    let count = 0;
+    for (const row of board) {
+        for (const cell of row) {
+            if (cell.ship?.type === CellType.Energy && cell.ship.powering === componentId) {
+                count++;
+            }
+        }
+    }
+    return count;
+};
 
 export default function Home() {
   const {
@@ -56,7 +68,7 @@ export default function Home() {
     }
 
     const availableEnergy = gameState.player.board.flat().filter(c => c.ship?.type === CellType.Energy && !c.ship.usedThisTurn && !c.isHit).length;
-    const availableAmmo = gameState.player.board.flat().filter(c => c.ship?.type === CellType.Ammo && !c.ship.usedThisTurn && c.ship.isEnergized && !c.isHit).length;
+    const availableAmmo = gameState.player.board.flat().filter(c => c.ship?.type === CellType.Ammo && !c.ship.usedThisTurn && !c.isHit && getPoweredComponentEnergySourcesCount(gameState.player.board, c.ship.id) >= 1).length;
 
     return (
       <div className="flex flex-col gap-4">
@@ -96,8 +108,10 @@ export default function Home() {
             const spec = WEAPON_SPECS[weapon.type as keyof typeof WEAPON_SPECS];
             if (!spec) return null;
             const charge = weapon.ammoCharge || 0;
-            const isReady = charge >= spec.ammoCost;
-            const isEnergized = weapon.isEnergized;
+            const energySources = getPoweredComponentEnergySourcesCount(gameState.player.board, weapon.id);
+            const isEnergized = energySources >= spec.energyCost;
+            const isReady = charge >= spec.ammoCost && isEnergized;
+
             return (
               <Card key={weapon.id} className={`p-3 mb-2 ${gameState.selectedWeaponId === weapon.id ? 'border-accent' : ''} ${!isEnergized ? 'opacity-50' : ''}`}>
                  <div className="flex justify-between items-center">
@@ -227,3 +241,5 @@ export default function Home() {
     </div>
   );
 }
+
+    
