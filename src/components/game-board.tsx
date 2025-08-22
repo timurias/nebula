@@ -107,7 +107,7 @@ export default function GameBoard({ board, ships, onCellClick, isPlayerBoard, de
                 
                 {(isPlayerBoard || debug) && cell.ship && !cell.isHit && (
                   <>
-                  <Icon className={cn("w-2/3 h-2/3", isPlayerBoard ? "text-primary-foreground/80" : "text-accent-foreground/50")} />
+                  {Icon && <Icon className={cn("w-2/3 h-2/3", isPlayerBoard ? "text-primary-foreground/80" : "text-accent-foreground/50")} />}
                   {cell.ship.isEnergized === false && (
                     <div className="absolute inset-0 bg-black/50" />
                   )}
