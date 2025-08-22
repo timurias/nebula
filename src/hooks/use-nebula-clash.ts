@@ -188,11 +188,11 @@ export const useNebulaClash = () => {
           return total + Math.min(ship.weaponCount, ship.ammoCount);
       }, 0);
   }, []);
-
+  
   const checkWinner = useCallback((playerState: PlayerState, aiState: PlayerState): Player | undefined => {
-    const playerShipsSunk = playerState.identifiedShips.every(s => s.isSunk);
-    const aiShipsSunk = aiState.identifiedShips.every(s => s.isSunk);
-    
+    const playerShipsSunk = playerState.identifiedShips.length > 0 && playerState.identifiedShips.every(s => s.isSunk);
+    const aiShipsSunk = aiState.identifiedShips.length > 0 && aiState.identifiedShips.every(s => s.isSunk);
+
     if (playerShipsSunk && aiShipsSunk) {
         return playerState.totalPoints > aiState.totalPoints ? 'human' : 'ai';
     }
@@ -200,52 +200,53 @@ export const useNebulaClash = () => {
     if (aiShipsSunk) return "human";
     return undefined;
   }, []);
-  
+
   const endTurn = useCallback(() => {
     setGameState(prev => {
-        let newPlayerBoard = JSON.parse(JSON.stringify(prev.player.board));
-        let newPlayerShips = identifyShips(newPlayerBoard);
+        const processPlayerTurnEnd = (playerState: PlayerState): PlayerState => {
+            let newBoard = JSON.parse(JSON.stringify(playerState.board));
+            let newShips = identifyShips(newBoard);
 
-        const repairShip = (ship: IdentifiedShip, board: Board) => {
-            if(ship.isSunk || ship.medicalCount === 0) return;
+            if (prev.turnNumber > 0 && prev.turnNumber % 3 === 0) {
+                newShips.forEach(ship => {
+                    if (ship.isSunk || ship.medicalCount === 0) return;
 
-            let repairsMade = 0;
-            const damagedCells = ship.cells
-              .map(c => ({...c, cell: board[c.row][c.col]}))
-              .filter(c => c.cell.isHit && !c.cell.repairTurnsLeft);
-            
-            for (const cellToRepair of damagedCells) {
-                if (repairsMade >= ship.medicalCount) break;
-                board[cellToRepair.row][cellToRepair.col].repairTurnsLeft = 3; 
-                repairsMade++;
+                    let repairsMade = 0;
+                    const damagedCells = ship.cells
+                        .map(c => ({ ...c, cell: newBoard[c.row][c.col] }))
+                        .filter(c => c.cell.isHit && !c.cell.repairTurnsLeft);
+
+                    for (const cellToRepair of damagedCells) {
+                        if (repairsMade >= ship.medicalCount) break;
+                        newBoard[cellToRepair.row][cellToRepair.col].repairTurnsLeft = 3;
+                        repairsMade++;
+                    }
+                });
             }
-        }
 
-        if (prev.turnNumber > 0 && prev.turnNumber % 3 === 0) {
-            newPlayerShips.forEach(ship => repairShip(ship, newPlayerBoard));
-
-            const newAiBoard = JSON.parse(JSON.stringify(prev.ai.board));
-            const newAiShips = identifyShips(newAiBoard);
-            newAiShips.forEach(ship => repairShip(ship, newAiBoard));
-        }
-
-        newPlayerBoard.flat().forEach(cell => {
-            if (cell.repairTurnsLeft && cell.repairTurnsLeft > 0) {
-                cell.repairTurnsLeft--;
-                if (cell.repairTurnsLeft === 0) {
-                    cell.isHit = false;
+            for (const row of newBoard) {
+                for (const cell of row) {
+                    if (cell.repairTurnsLeft && cell.repairTurnsLeft > 0) {
+                        cell.repairTurnsLeft--;
+                        if (cell.repairTurnsLeft === 0) {
+                            cell.isHit = false;
+                        }
+                    }
                 }
             }
-        });
-        
-        newPlayerShips = identifyShips(newPlayerBoard);
 
-        const newPlayerState = {
-            ...prev.player,
-            board: newPlayerBoard,
-            identifiedShips: newPlayerShips,
-            attacks: calculateAttacks(newPlayerShips)
-        }
+            newShips = identifyShips(newBoard);
+
+            return {
+                ...playerState,
+                board: newBoard,
+                identifiedShips: newShips,
+                attacks: calculateAttacks(newShips)
+            };
+        };
+
+        const newPlayerState = processPlayerTurnEnd(prev.player);
+        const newAiState = processPlayerTurnEnd(prev.ai);
 
         const nextTurn = prev.turn === 'human' ? 'ai' : 'human';
         
@@ -253,115 +254,120 @@ export const useNebulaClash = () => {
             ...prev,
             turn: nextTurn,
             message: nextTurn === 'human' ? "Your turn." : "Enemy's turn.",
-            attacksRemaining: nextTurn === 'human' ? newPlayerState.attacks : prev.ai.attacks,
+            attacksRemaining: nextTurn === 'human' ? newPlayerState.attacks : newAiState.attacks,
             player: newPlayerState,
-            turnNumber: nextTurn === 'human' ? prev.turnNumber : prev.turnNumber + 1
+            ai: newAiState,
+            turnNumber: nextTurn === 'human' ? prev.turnNumber + 1 : prev.turnNumber
         }
     });
   }, [calculateAttacks]);
 
-  const handleAttack = useCallback((attacker: Player, row: number, col: number) => {
-      setGameState(prev => {
-          const isHumanAttack = attacker === 'human';
-          
-          if(isHumanAttack && prev.attacksRemaining <= 0) {
-              if (prev.phase === 'playing') {
-                toast({title: "Out of attacks", description: "You have no attacks left for this turn.", variant: "destructive"});
-              }
-              return prev;
-          }
+  const handleAttack = useCallback((attacker: Player, row: number, col: number): boolean => {
+    let wasValidAttack = false;
+    setGameState(prev => {
+        const isHumanAttack = attacker === 'human';
+        
+        if (isHumanAttack && prev.attacksRemaining <= 0) {
+            if (prev.phase === 'playing') {
+              toast({title: "Out of attacks", description: "You have no attacks left for this turn.", variant: "destructive"});
+            }
+            return prev;
+        }
 
-          const targetPlayerKey = isHumanAttack ? 'ai' : 'player';
-          const targetState = prev[targetPlayerKey];
+        const targetPlayerKey = isHumanAttack ? 'ai' : 'player';
+        const targetState = prev[targetPlayerKey];
 
-          if (!targetState) return prev;
+        if (!targetState) return prev;
 
-          const newBoard = JSON.parse(JSON.stringify(targetState.board));
-          const cell = newBoard[row][col];
+        const newBoard = JSON.parse(JSON.stringify(targetState.board));
+        const cell = newBoard[row][col];
 
-          if(cell.isHit || cell.isMiss) {
-              if(isHumanAttack) toast({ title: "Wasted Shot!", description: "You've already fired at this location.", variant: "destructive"});
-              return prev;
-          }
+        if (cell.isHit || cell.isMiss) {
+            if(isHumanAttack) toast({ title: "Wasted Shot!", description: "You've already fired at this location.", variant: "destructive"});
+            return prev;
+        }
+        
+        wasValidAttack = true;
 
-          const animationType = cell.ship ? "hit" : "miss";
-          newBoard[row][col] = {...cell, animation: animationType };
+        const animationType = cell.ship ? "hit" : "miss";
+        newBoard[row][col] = {...cell, animation: animationType };
 
-          let updatedState = { ...prev };
-          updatedState[targetPlayerKey] = { ...targetState, board: newBoard };
-           if(isHumanAttack) {
-              updatedState.attacksRemaining = prev.attacksRemaining -1;
-          }
+        let updatedState = { ...prev };
+        updatedState[targetPlayerKey] = { ...targetState, board: newBoard };
+         if(isHumanAttack) {
+            updatedState.attacksRemaining = prev.attacksRemaining - 1;
+        }
 
-          setTimeout(() => {
-              setGameState(current => {
-                    let newAiMemory = {...current.aiMemory};
-                    const currentTargetState = current[targetPlayerKey];
-                    const board = JSON.parse(JSON.stringify(currentTargetState.board));
-                    const cell = board[row][col];
+        setTimeout(() => {
+            setGameState(current => {
+                let newAiMemory = {...current.aiMemory};
+                const currentTargetState = current[targetPlayerKey];
+                const board = JSON.parse(JSON.stringify(currentTargetState.board));
+                const cell = board[row][col];
 
-                    delete cell.animation;
-                    let message = "";
-                    let attackResult: 'hit' | 'miss' = 'miss';
+                delete cell.animation;
+                let message = "";
+                let attackResult: 'hit' | 'miss' = 'miss';
 
-                    if (cell.ship) {
-                        cell.isHit = true;
-                        attackResult = 'hit';
-                        message = `${attacker === "human" ? "You" : "AI"} scored a HIT!`;
+                if (cell.ship) {
+                    cell.isHit = true;
+                    attackResult = 'hit';
+                    message = `${attacker === "human" ? "You" : "AI"} scored a HIT!`;
 
-                        if(!isHumanAttack) {
-                           newAiMemory.lastHit = {row, col};
-                           newAiMemory.searchAndDestroy = true; 
-                           newAiMemory.potentialTargets = [];
-                        }
-
-                    } else {
-                        cell.isMiss = true;
-                        message = `${attacker === "human" ? "You" : "AI"} missed.`;
-                        if(!isHumanAttack && newAiMemory.lastHit) {
-                           const {row: lastR, col: lastC} = newAiMemory.lastHit;
-                           if (board[lastR][lastC]) {
-                             const lastCell = board[lastR][lastC];
-                             if(lastCell.isHit){
-                                 newAiMemory.huntDirection = null;
-                             }
-                           }
-                        }
+                    if(!isHumanAttack) {
+                       newAiMemory.lastHit = {row, col};
+                       newAiMemory.searchAndDestroy = true; 
+                       newAiMemory.potentialTargets = [];
                     }
 
-                    const newTargetShips = identifyShips(board);
-                    const newTargetState = {...currentTargetState, board: board, identifiedShips: newTargetShips, attacks: calculateAttacks(newTargetShips)};
-                    
-                    const winner = checkWinner(
-                        isHumanAttack ? current.player : newTargetState,
-                        isHumanAttack ? newTargetState : current.ai
-                    );
-
-                    let finalState = {
-                         ...current,
-                        [targetPlayerKey]: newTargetState,
-                        message,
-                        aiMemory: newAiMemory,
-                        lastAttack: { attacker, row, col, result: attackResult }
+                } else {
+                    cell.isMiss = true;
+                    message = `${attacker === "human" ? "You" : "AI"} missed.`;
+                    if(!isHumanAttack && newAiMemory.lastHit) {
+                       const {row: lastR, col: lastC} = newAiMemory.lastHit;
+                       if (board[lastR][lastC]) {
+                         const lastCell = board[lastR][lastC];
+                         if(lastCell.isHit){
+                             newAiMemory.huntDirection = null;
+                         }
+                       }
                     }
+                }
 
-                    if (winner) {
-                        finalState = {
-                            ...finalState,
-                            phase: "over",
-                            winner,
-                            message: winner === 'human' ? "Congratulations, you won!" : "The AI has defeated you.",
-                        };
-                    } else if(isHumanAttack && current.attacksRemaining - 1 <= 0) {
-                        endTurn();
-                    }
+                const newTargetShips = identifyShips(board);
+                const newTargetState = {...currentTargetState, board: board, identifiedShips: newTargetShips, attacks: calculateAttacks(newTargetShips)};
+                
+                const winner = checkWinner(
+                    isHumanAttack ? current.player : newTargetState,
+                    isHumanAttack ? newTargetState : current.ai
+                );
 
-                    return finalState;
-                });
-          }, 750);
+                let finalState = {
+                     ...current,
+                    [targetPlayerKey]: newTargetState,
+                    message,
+                    aiMemory: newAiMemory,
+                    lastAttack: { attacker, row, col, result: attackResult }
+                }
 
-          return updatedState;
-      });
+                if (winner) {
+                    finalState = {
+                        ...finalState,
+                        phase: "over",
+                        winner,
+                        message: winner === 'human' ? "Congratulations, you won!" : "The AI has defeated you.",
+                    };
+                } else if(isHumanAttack && current.attacksRemaining - 1 <= 0) {
+                    endTurn();
+                }
+
+                return finalState;
+            });
+        }, 750);
+
+        return updatedState;
+    });
+    return wasValidAttack;
   }, [toast, endTurn, calculateAttacks, checkWinner]);
   
   const getSmartMove = useCallback(async (board: Board, size: number, aiMemory: GameState['aiMemory'], difficulty: Difficulty) => {
@@ -443,37 +449,29 @@ export const useNebulaClash = () => {
   
   const handleAIturn = useCallback(async () => {
     setGameState(prev => ({...prev, message: "AI is thinking..."}));
-
     await new Promise(resolve => setTimeout(resolve, 500)); 
 
-    let attacksMade = 0;
-    while(attacksMade < gameState.ai.attacks) {
-        let continueAttack = true;
-        await new Promise<void>(resolve => {
-            setGameState(prev => {
-                const { settings, player: playerState, aiMemory } = prev;
-                const {board, boardSize} = {board: playerState.board, boardSize: settings.boardSize};
+    let attacksToMake = gameState.ai.attacks;
+    
+    while(attacksToMake > 0) {
+        const { settings, player: playerState, aiMemory } = gameState;
+        const { board, boardSize } = { board: playerState.board, boardSize: settings.boardSize };
+        const { move } = await getSmartMove(board, boardSize, aiMemory, settings.difficulty);
 
-                getSmartMove(board, boardSize, aiMemory, settings.difficulty).then(result => {
-                    const { move } = result;
-                     if(move) {
-                        handleAttack("ai", move.row, move.col);
-                    } else {
-                        continueAttack = false;
-                    }
-                });
-
-                return prev;
-            });
-            attacksMade++;
-            if(!continueAttack) attacksMade = gameState.ai.attacks;
-            setTimeout(() => resolve(), 1000);
-        });
+        if (move) {
+            const isValid = handleAttack("ai", move.row, move.col);
+            if (isValid) {
+                attacksToMake--;
+            }
+        } else {
+            // No more moves available
+            break;
+        }
+        await new Promise(resolve => setTimeout(resolve, 1000));
     }
-
-     endTurn();
-
-  }, [gameState.ai.attacks, getSmartMove, handleAttack, endTurn]);
+    
+    endTurn();
+  }, [gameState, getSmartMove, handleAttack, endTurn]);
   
   const placeShipCell = useCallback((row: number, col: number) => {
     setGameState(prev => {
@@ -562,31 +560,24 @@ export const useNebulaClash = () => {
         };
     });
     toast({ title: "Fleet Deployed!", description: "Your ships are in position. Time to attack." });
-  }, [toast, placeAllShipsRandomly, calculateAttacks]);
+  }, [placeAllShipsRandomly, calculateAttacks, toast]);
   
   const placeShipsRandomly = useCallback(() => {
     setIsPlacingRandomly(true);
-    setTimeout(() => {
-        setGameState(prev => {
-            const newPlayerState = placeAllShipsRandomly(prev.player, prev.settings.boardSize);
-            const newAiState = placeAllShipsRandomly(prev.ai, prev.settings.boardSize);
+    setGameState(prev => {
+        const newPlayerState = placeAllShipsRandomly(prev.player, prev.settings.boardSize);
+        return {
+            ...prev,
+            player: newPlayerState,
+        };
+    });
 
-            return {
-                ...prev,
-                phase: "playing",
-                placingShips: false,
-                player: newPlayerState,
-                ai: newAiState,
-                message: "Random fleets deployed! Your turn.",
-                selectedCellType: null,
-                turn: 'human',
-                attacksRemaining: newPlayerState.attacks,
-            };
-        });
+    setTimeout(() => {
+        finishPlacing();
         toast({ title: "Fleets Deployed!", description: "Your random fleet is ready. Good luck." });
         setIsPlacingRandomly(false);
     }, 500);
-  }, [toast, placeAllShipsRandomly]);
+  }, [placeAllShipsRandomly, finishPlacing, toast]);
   
   const handleCellClick = useCallback((row: number, col: number, boardOwner: Player) => {
     const { phase, turn, placingShips } = gameState;
@@ -666,3 +657,6 @@ export const useNebulaClash = () => {
 
   return { gameState, startGame, selectCellType, handleCellClick, resetGame, placeShipsRandomly, isPlacingRandomly, finishPlacing, toggleDebugMode };
 };
+
+
+    
