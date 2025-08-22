@@ -1,15 +1,15 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import type {
-  GameState,
-  GameSettings,
-  Player,
-  Board,
-  CellState,
+import {
+  type GameState,
+  type GameSettings,
+  type Player,
+  type Board,
+  type CellState,
   CellType,
-  BoardSize,
-  PlayerState,
+  type BoardSize,
+  type PlayerState,
 } from "@/types";
 import { adjustAIDifficulty } from "@/ai/flows/ai-difficulty-adjustment";
 import { evaluateMove } from "@/ai/flows/ai-opponent-move-evaluation";
