@@ -431,11 +431,10 @@ export const useNebulaClash = () => {
   }, [toast]);
 
   const finishPlacing = useCallback(() => {
+    toast({ title: "Fleet Deployed!", description: "Your ships are in position. Time to attack." });
     setGameState(prev => {
         const newAiState = { ...prev.ai };
         placeAllShipsRandomly(newAiState, prev.settings.boardSize);
-
-        toast({ title: "Fleet Deployed!", description: "Your ships are in position. Time to attack." });
         return {
             ...prev,
             phase: "playing",
