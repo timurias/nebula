@@ -162,13 +162,12 @@ export const useNebulaClash = () => {
     if (aiShipsSunk) return "human";
     return undefined;
   }, []);
-
+  
   const endTurn = useCallback(() => {
     setGameState(prev => {
-        const processPlayerTurnEnd = (playerState: PlayerState): PlayerState => {
-            let newBoard = JSON.parse(JSON.stringify(playerState.board));
-            let newShips = identifyShips(newBoard);
-
+        const processPlayerTurnEnd = (stateToProcess: PlayerState): PlayerState => {
+            let newBoard = JSON.parse(JSON.stringify(stateToProcess.board));
+            
             // 1. Decrement existing repair timers
             for (let r = 0; r < newBoard.length; r++) {
                 for (let c = 0; c < newBoard[r].length; c++) {
@@ -182,7 +181,7 @@ export const useNebulaClash = () => {
                 }
             }
             
-            newShips = identifyShips(newBoard); // Re-identify ships after repairs might have completed
+            let newShips = identifyShips(newBoard); // Re-identify ships after repairs might have completed
 
             // 2. Assign new repairs
             newShips.forEach(ship => {
@@ -207,15 +206,19 @@ export const useNebulaClash = () => {
             newShips = identifyShips(newBoard);
 
             return {
-                ...playerState,
+                ...stateToProcess,
                 board: newBoard,
                 identifiedShips: newShips,
                 attacks: calculateAttacks(newShips)
             };
         };
 
-        const newPlayerState = processPlayerTurnEnd(prev.player);
-        const newAiState = processPlayerTurnEnd(prev.ai);
+        const activePlayerKey = prev.turn;
+        const stateToUpdate = activePlayerKey === 'human' ? prev.player : prev.ai;
+        const updatedState = processPlayerTurnEnd(stateToUpdate);
+
+        const newPlayerState = activePlayerKey === 'human' ? updatedState : prev.player;
+        const newAiState = activePlayerKey === 'ai' ? updatedState : prev.ai;
 
         const nextTurn = prev.turn === 'human' ? 'ai' : 'human';
         const newTurnNumber = prev.turn === 'human' ? prev.turnNumber : prev.turnNumber + 1;
@@ -229,7 +232,6 @@ export const useNebulaClash = () => {
             message: winner === 'human' ? 'You have conquered the nebula.' : 'Your fleet has been destroyed.'
           }
         }
-
 
         return {
             ...prev,
@@ -303,14 +305,11 @@ export const useNebulaClash = () => {
           const newTargetShips = identifyShips(boardAfterAnimation);
           const newTargetState = { ...currentTargetState, board: boardAfterAnimation, identifiedShips: newTargetShips, attacks: calculateAttacks(newTargetShips) };
           
-          let finalState: GameState;
-          if (isHumanAttack) {
-              finalState = { ...current, ai: newTargetState, message };
-          } else {
-              // For AI attacks, we should not be in this timeout. This part of logic is faulty for AI.
-              // But we keep it for human player animations.
-              return current;
-          }
+          let finalState: GameState = { ...current };
+
+          finalState[targetPlayerKey] = newTargetState;
+          finalState.message = message;
+
 
           const winner = checkWinner(finalState.player, finalState.ai);
           if (winner) {
@@ -372,7 +371,7 @@ export const useNebulaClash = () => {
       return updatedState;
     });
     return wasValidAttack;
-  }, [toast, calculateAttacks, checkWinner]);
+  }, [toast, calculateAttacks, checkWinner, endTurn]);
 
   const getSmartMove = useCallback(async (board: Board, size: number, aiMemory: GameState['aiMemory'], difficulty: Difficulty, turnNumber: number) => {
     let targets = [...aiMemory.potentialTargets];
@@ -608,11 +607,30 @@ export const useNebulaClash = () => {
     });
 
     setTimeout(() => {
-        finishPlacing();
+      setGameState(prev => {
+        const newAiState = placeAllShipsRandomly(prev.ai, prev.settings.boardSize);
+        
+        const newPlayerState = {...prev.player};
+        newPlayerState.identifiedShips = identifyShips(newPlayerState.board);
+        newPlayerState.attacks = calculateAttacks(newPlayerState.identifiedShips);
+
         toast({ title: "Fleets Deployed!", description: "Your random fleet is ready. Good luck." });
-        setIsPlacingRandomly(false);
+
+        return {
+            ...prev,
+            phase: "playing",
+            placingShips: false,
+            ai: newAiState,
+            player: newPlayerState,
+            message: "All ships placed! Your turn to attack.",
+            selectedCellType: null,
+            turn: 'human',
+            attacksRemaining: newPlayerState.attacks,
+        };
+      });
+      setIsPlacingRandomly(false);
     }, 500);
-  }, [placeAllShipsRandomly, finishPlacing, toast]);
+  }, [placeAllShipsRandomly, calculateAttacks, toast]);
   
   const handleCellClick = useCallback((row: number, col: number, boardOwner: Player) => {
     const { phase, turn, placingShips, attacksRemaining } = gameState;
@@ -728,13 +746,14 @@ export const useNebulaClash = () => {
 
           if (gameState.ai.attacks > 0) {
               setGameState(prev => ({ ...prev, message: `AI is thinking... (${prev.ai.attacks} attacks left)` }));
-              await new Promise(resolve => setTimeout(resolve, 500)); // Delay for thinking
+              await new Promise(resolve => setTimeout(resolve, 500));
               
               const { settings, player: playerState, aiMemory, turnNumber } = gameState;
               const { move } = await getSmartMove(playerState.board, settings.boardSize, aiMemory, settings.difficulty, turnNumber);
   
               if (move) {
-                  handleAttack("ai", move.row, move.col);
+                  const wasValid = handleAttack("ai", move.row, move.col);
+                  // Subsequent attacks will be triggered by the state update in handleAttack
               } else {
                   // No valid moves left, end turn early
                   endTurn();
@@ -755,5 +774,3 @@ export const useNebulaClash = () => {
 
   return { gameState, startGame, selectCellType, handleCellClick, resetGame, placeShipsRandomly, isPlacingRandomly, finishPlacing, toggleDebugMode };
 };
-
-    
