@@ -16,6 +16,7 @@ import {
 } from "@/types";
 import { adjustAIDifficulty } from "@/ai/flows/ai-difficulty-adjustment";
 import { useToast } from "@/hooks/use-toast";
+import { evaluateMove } from "@/ai/flows/ai-opponent-move-evaluation";
 
 const getPointsForBoardSize = (boardSize: BoardSize): number => {
     switch (boardSize) {
@@ -232,52 +233,77 @@ export const useNebulaClash = () => {
     });
   }, [toast]);
 
-  const getSmartMove = (board: Board, size: number, aiMemory: GameState['aiMemory']) => {
+  const getSmartMove = useCallback(async (board: Board, size: number, aiMemory: GameState['aiMemory'], difficulty: Difficulty) => {
     let targets = [...aiMemory.potentialTargets];
 
     if (aiMemory.searchAndDestroy && aiMemory.lastHit) {
-        const {row, col} = aiMemory.lastHit;
-        const directions = [
-            {r: -1, c: 0, d: 'up'}, {r: 1, c: 0, d: 'down'},
-            {r: 0, c: -1, d: 'left'}, {r: 0, c: 1, d: 'right'}
-        ];
+      const { row, col } = aiMemory.lastHit;
+      const directions = [
+        { r: -1, c: 0, d: 'up' }, { r: 1, c: 0, d: 'down' },
+        { r: 0, c: -1, d: 'left' }, { r: 0, c: 1, d: 'right' }
+      ];
 
-        if(aiMemory.huntDirection) {
-            const dir = directions.find(d => d.d === aiMemory.huntDirection)!;
-            let nextR = row + dir.r;
-            let nextC = col + dir.c;
-            while(nextR >= 0 && nextR < size && nextC >= 0 && nextC < size) {
-                if(!board[nextR][nextC].isHit && !board[nextR][nextC].isMiss) {
-                    return { move: {row: nextR, col: nextC}, updatedTargets: targets };
-                }
-                if(board[nextR][nextC].isMiss) break; 
-                nextR += dir.r;
-                nextC += dir.c;
-            }
-        }
-        for (const dir of directions) {
-            const nextR = row + dir.r;
-            const nextC = col + dir.c;
-            if (nextR >= 0 && nextR < size && nextC >= 0 && nextC < size && !board[nextR][nextC].isHit && !board[nextR][nextC].isMiss) {
-                targets.unshift({row: nextR, col: nextC});
-            }
-        }
-    }
-
-    while(targets.length > 0) {
-        const move = targets.shift();
-        if(move && !board[move.row][move.col].isHit && !board[move.row][move.col].isMiss) {
-            return { move, updatedTargets: targets };
-        }
-    }
-
-    const allPossible : { row: number; col: number }[] = [];
-    for (let r = 0; r < size; r++) {
-      for (let c = 0; c < size; c++) {
-        if ((r + c) % 2 === 0 && !board[r][c].isHit && !board[r][c].isMiss) {
-          allPossible.push({ row: r, col: c });
+      if (aiMemory.huntDirection) {
+        const dir = directions.find(d => d.d === aiMemory.huntDirection)!;
+        let nextR = row + dir.r;
+        let nextC = col + dir.c;
+        while (nextR >= 0 && nextR < size && nextC >= 0 && nextC < size) {
+          if (!board[nextR][nextC].isHit && !board[nextR][nextC].isMiss) {
+            return { move: { row: nextR, col: nextC }, updatedTargets: targets };
+          }
+          if (board[nextR][nextC].isMiss) break;
+          nextR += dir.r;
+          nextC += dir.c;
         }
       }
+      for (const dir of directions) {
+        const nextR = row + dir.r;
+        const nextC = col + dir.c;
+        if (nextR >= 0 && nextR < size && nextC >= 0 && nextC < size && !board[nextR][nextC].isHit && !board[nextR][nextC].isMiss) {
+          targets.unshift({ row: nextR, col: nextC });
+        }
+      }
+    }
+
+    while (targets.length > 0) {
+      const move = targets.shift();
+      if (move && !board[move.row][move.col].isHit && !board[move.row][move.col].isMiss) {
+        return { move, updatedTargets: targets };
+      }
+    }
+
+    const allPossible: { row: number; col: number }[] = [];
+    const checkerboardPossible: { row: number; col: number }[] = [];
+    for (let r = 0; r < size; r++) {
+      for (let c = 0; c < size; c++) {
+        if (!board[r][c].isHit && !board[r][c].isMiss) {
+          allPossible.push({ row: r, col: c });
+          if ((r + c) % 2 === 0) {
+            checkerboardPossible.push({ row: r, col: c });
+          }
+        }
+      }
+    }
+
+    if (difficulty === 'hard' && allPossible.length > 0) {
+        const move = allPossible[Math.floor(Math.random() * allPossible.length)];
+        try {
+            const evaluation = await evaluateMove({
+                boardState: JSON.stringify(board),
+                move: `${String.fromCharCode(65 + move.row)}${move.col + 1}`,
+                opponentBoard: "Unknown"
+            });
+            if(evaluation.isHighValue){
+                return { move, updatedTargets: [] };
+            }
+        } catch (e) {
+            console.error("AI move evaluation failed, falling back to random.", e);
+        }
+    }
+    
+    if (difficulty !== 'easy' && checkerboardPossible.length > 0) {
+        const move = checkerboardPossible[Math.floor(Math.random() * checkerboardPossible.length)];
+        return { move, updatedTargets: [] };
     }
 
     if (allPossible.length > 0) {
@@ -285,143 +311,77 @@ export const useNebulaClash = () => {
       return { move, updatedTargets: [] };
     }
 
-    const remainingPossible : { row: number; col: number }[] = [];
-     for (let r = 0; r < size; r++) {
-      for (let c = 0; c < size; c++) {
-        if (!board[r][c].isHit && !board[r][c].isMiss) {
-          remainingPossible.push({ row: r, col: c });
-        }
-      }
-    }
-    if (remainingPossible.length > 0) {
-        const move = remainingPossible[Math.floor(Math.random() * remainingPossible.length)];
-        return { move, updatedTargets: [] };
-    }
-
-
     return { move: null, updatedTargets: [] };
-  }
-
-
-  const handleAIturn = useCallback(async () => {
-    setGameState(prev => ({...prev, message: "AI is thinking..."}));
-
-    await new Promise(resolve => setTimeout(resolve, 500)); 
-
-    let attacksMade = 0;
-    while(attacksMade < gameState.ai.attacks) {
-        let continueAttack = true;
-        await new Promise<void>(resolve => {
-            setGameState(prev => {
-                const { settings, player: playerState, aiMemory } = prev;
-                const {board, boardSize} = {board: playerState.board, boardSize: settings.boardSize};
-
-                let move: { row: number; col: number } | null = null;
-
-                if (settings.difficulty === 'easy') {
-                    const allPossible : { row: number; col: number }[] = [];
-                    for (let r = 0; r < boardSize; r++) {
-                        for (let c = 0; c < boardSize; c++) {
-                            if (!board[r][c].isHit && !board[r][c].isMiss) {
-                                allPossible.push({ row: r, col: c });
-                            }
-                        }
-                    }
-                    if (allPossible.length > 0) {
-                         move = allPossible[Math.floor(Math.random() * allPossible.length)];
-                    }
-                } else { 
-                    const result = getSmartMove(board, boardSize, aiMemory);
-                    move = result.move;
-                }
-
-                if(move) {
-                  const finalMove = move;
-                  handleAttack("ai", finalMove.row, finalMove.col);
-                } else {
-                   continueAttack = false;
-                }
-                return prev;
-            });
-            attacksMade++;
-            if(!continueAttack) attacksMade = gameState.ai.attacks;
-            setTimeout(() => resolve(), 1000);
-        });
-    }
-
-     endTurn();
-
-  }, [gameState.ai.attacks ]);
-
-
-  useEffect(() => {
-    if (gameState.phase === "playing" && gameState.turn === "ai" && !gameState.winner) {
-        const aiTurnTimeout = setTimeout(() => {
-            handleAIturn();
-        }, 1500);
-        return () => clearTimeout(aiTurnTimeout);
-    }
-  }, [gameState.phase, gameState.turn, gameState.winner, handleAIturn]);
+  }, []);
 
   const checkWinner = (playerState: PlayerState, aiState: PlayerState): Player | undefined => {
-    if (playerState.identifiedShips.every(s => s.isSunk)) return "ai";
-    if (aiState.identifiedShips.every(s => s.isSunk)) return "human";
+    const playerShips = identifyShips(playerState.board);
+    const aiShips = identifyShips(aiState.board);
+    if (playerShips.every(s => s.isSunk)) return "ai";
+    if (aiShips.every(s => s.isSunk)) return "human";
     return undefined;
   }
 
+  const calculateAttacks = (ships: IdentifiedShip[]) => {
+      return ships.reduce((total, ship) => {
+          if(ship.isSunk) return total;
+          return total + Math.min(ship.weaponCount, ship.ammoCount);
+      }, 0);
+  }
+
   const endTurn = useCallback(() => {
-      setGameState(prev => {
-          if (prev.turn === 'ai') { // AI's turn is ending
-              let newPlayerBoard = JSON.parse(JSON.stringify(prev.player.board));
-              const newPlayerShips = identifyShips(newPlayerBoard);
+    setGameState(prev => {
+        if (prev.turn === 'ai') { // AI's turn is ending
+            let newPlayerBoard = JSON.parse(JSON.stringify(prev.player.board));
+            const newPlayerShips = identifyShips(newPlayerBoard);
 
-              if (prev.turnNumber > 0 && prev.turnNumber % 3 === 0) {
-                  newPlayerShips.forEach(ship => {
-                      if(ship.isSunk || ship.medicalCount === 0) return;
+            if (prev.turnNumber > 0 && prev.turnNumber % 3 === 0) {
+                newPlayerShips.forEach(ship => {
+                    if(ship.isSunk || ship.medicalCount === 0) return;
 
-                      let repairsMade = 0;
-                      const damagedCells = ship.cells
-                        .map(c => ({...c, cell: newPlayerBoard[c.row][c.col]}))
-                        .filter(c => c.cell.isHit);
-                      
-                      for (const cellToRepair of damagedCells) {
-                          if (repairsMade >= ship.medicalCount) break;
-                          newPlayerBoard[cellToRepair.row][cellToRepair.col].isHit = false;
-                          newPlayerBoard[cellToRepair.row][cellToRepair.col].repairTurnsLeft = 0; 
-                          repairsMade++;
-                      }
-                  });
-              } else {
-                  newPlayerBoard.flat().forEach(cell => {
-                      if (cell.repairTurnsLeft && cell.repairTurnsLeft > 0) {
-                          cell.repairTurnsLeft--;
-                      }
-                  });
-              }
+                    let repairsMade = 0;
+                    const damagedCells = ship.cells
+                      .map(c => ({...c, cell: newPlayerBoard[c.row][c.col]}))
+                      .filter(c => c.cell.isHit);
+                    
+                    for (const cellToRepair of damagedCells) {
+                        if (repairsMade >= ship.medicalCount) break;
+                        newPlayerBoard[cellToRepair.row][cellToRepair.col].isHit = false;
+                        newPlayerBoard[cellToRepair.row][cellToRepair.col].repairTurnsLeft = 0; 
+                        repairsMade++;
+                    }
+                });
+            } else {
+                newPlayerBoard.flat().forEach(cell => {
+                    if (cell.repairTurnsLeft && cell.repairTurnsLeft > 0) {
+                        cell.repairTurnsLeft--;
+                    }
+                });
+            }
 
-              const newPlayerState = {
-                  ...prev.player,
-                  board: newPlayerBoard,
-                  identifiedShips: identifyShips(newPlayerBoard),
-                  attacks: calculateAttacks(identifyShips(newPlayerBoard))
-              }
+            const newPlayerState = {
+                ...prev.player,
+                board: newPlayerBoard,
+                identifiedShips: identifyShips(newPlayerBoard),
+                attacks: calculateAttacks(identifyShips(newPlayerBoard))
+            }
 
-              return {
-                  ...prev,
-                  turn: 'human',
-                  message: "Your turn.",
-                  attacksRemaining: newPlayerState.attacks,
-                  player: newPlayerState,
-              }
-          } else { // Player's turn is ending
-              return {
-                  ...prev,
-                  turn: 'ai',
-                  message: "Enemy's turn.",
-                  turnNumber: prev.turnNumber + 1,
-              }
-          }
-      });
+            return {
+                ...prev,
+                turn: 'human',
+                message: "Your turn.",
+                attacksRemaining: newPlayerState.attacks,
+                player: newPlayerState,
+            }
+        } else { // Player's turn is ending
+            return {
+                ...prev,
+                turn: 'ai',
+                message: "Enemy's turn.",
+                turnNumber: prev.turnNumber + 1,
+            }
+        }
+    });
   }, []);
 
   const handleAttack = useCallback((attacker: Player, row: number, col: number) => {
@@ -429,7 +389,9 @@ export const useNebulaClash = () => {
           const isHumanAttack = attacker === 'human';
           
           if(isHumanAttack && prev.attacksRemaining <= 0) {
-              toast({title: "Out of attacks", description: "You have no attacks left for this turn.", variant: "destructive"});
+              if (prev.phase === 'playing') {
+                toast({title: "Out of attacks", description: "You have no attacks left for this turn.", variant: "destructive"});
+              }
               return prev;
           }
 
@@ -449,7 +411,7 @@ export const useNebulaClash = () => {
           const animationType = cell.ship ? "hit" : "miss";
           newBoard[row][col] = {...cell, animation: animationType };
 
-          const updatedState = { ...prev };
+          let updatedState = { ...prev };
           updatedState[targetPlayerKey] = { ...targetState, board: newBoard };
            if(isHumanAttack) {
               updatedState.attacksRemaining = prev.attacksRemaining -1;
@@ -483,9 +445,11 @@ export const useNebulaClash = () => {
                         message = `${attacker === "human" ? "You" : "AI"} missed.`;
                         if(!isHumanAttack && newAiMemory.lastHit) {
                            const {row: lastR, col: lastC} = newAiMemory.lastHit;
-                           const lastCell = board[lastR][lastC];
-                           if(lastCell.isHit){
-                                newAiMemory.huntDirection = null;
+                           if (board[lastR][lastC]) {
+                             const lastCell = board[lastR][lastC];
+                             if(lastCell.isHit){
+                                 newAiMemory.huntDirection = null;
+                             }
                            }
                         }
                     }
@@ -509,12 +473,8 @@ export const useNebulaClash = () => {
                         };
                     }
 
-                    let nextTurn = current.turn;
-                    let nextMessage = message;
-                    if(isHumanAttack && current.attacksRemaining -1 <= 0) {
+                    if(isHumanAttack && current.attacksRemaining - 1 <= 0) {
                         endTurn();
-                    } else if (!isHumanAttack) {
-                       // AI attack logic is handled in handleAIturn
                     }
 
 
@@ -532,6 +492,48 @@ export const useNebulaClash = () => {
       });
   }, [toast, endTurn]);
 
+  const handleAIturn = useCallback(async () => {
+    setGameState(prev => ({...prev, message: "AI is thinking..."}));
+
+    await new Promise(resolve => setTimeout(resolve, 500)); 
+
+    let attacksMade = 0;
+    while(attacksMade < gameState.ai.attacks) {
+        let continueAttack = true;
+        await new Promise<void>(resolve => {
+            setGameState(prev => {
+                const { settings, player: playerState, aiMemory } = prev;
+                const {board, boardSize} = {board: playerState.board, boardSize: settings.boardSize};
+
+                getSmartMove(board, boardSize, aiMemory, settings.difficulty).then(result => {
+                    const { move } = result;
+                     if(move) {
+                        handleAttack("ai", move.row, move.col);
+                    } else {
+                        continueAttack = false;
+                    }
+                });
+
+                return prev;
+            });
+            attacksMade++;
+            if(!continueAttack) attacksMade = gameState.ai.attacks;
+            setTimeout(() => resolve(), 1000);
+        });
+    }
+
+     endTurn();
+
+  }, [gameState.ai.attacks, getSmartMove, handleAttack, endTurn]);
+
+  useEffect(() => {
+    if (gameState.phase === "playing" && gameState.turn === "ai" && !gameState.winner) {
+        const aiTurnTimeout = setTimeout(() => {
+            handleAIturn();
+        }, 1500);
+        return () => clearTimeout(aiTurnTimeout);
+    }
+  }, [gameState.phase, gameState.turn, gameState.winner, handleAIturn]);
 
   const placeShipCell = useCallback((row: number, col: number) => {
     setGameState(prev => {
@@ -560,40 +562,6 @@ export const useNebulaClash = () => {
         return { ...prev, player: { ...prev.player, board: newBoard, points: newPoints, ships: newShips, identifiedShips, attacks } };
     });
   }, [toast]);
-
-  const calculateAttacks = (ships: IdentifiedShip[]) => {
-      return ships.reduce((total, ship) => {
-          if(ship.isSunk) return total;
-          return total + Math.min(ship.weaponCount, ship.ammoCount);
-      }, 0);
-  }
-
-  const finishPlacing = useCallback(() => {
-    setGameState(prev => {
-        const newAiState = { ...prev.ai };
-        placeAllShipsRandomly(newAiState, prev.settings.boardSize);
-        newAiState.identifiedShips = identifyShips(newAiState.board);
-        newAiState.attacks = calculateAttacks(newAiState.identifiedShips);
-        
-        const newPlayerState = {...prev.player};
-        newPlayerState.identifiedShips = identifyShips(newPlayerState.board);
-        newPlayerState.attacks = calculateAttacks(newPlayerState.identifiedShips);
-
-        toast({ title: "Fleet Deployed!", description: "Your ships are in position. Time to attack." });
-        return {
-            ...prev,
-            phase: "playing",
-            placingShips: false,
-            ai: newAiState,
-            player: newPlayerState,
-            message: "All ships placed! Your turn to attack.",
-            selectedCellType: null,
-            turn: 'human',
-            attacksRemaining: newPlayerState.attacks,
-        };
-    });
-  }, [toast]);
-
 
   const placeAllShipsRandomly = (playerState: PlayerState, boardSize: BoardSize) => {
     playerState.board = createEmptyBoard(boardSize);
@@ -631,6 +599,32 @@ export const useNebulaClash = () => {
     }
   }
 
+  const finishPlacing = useCallback(() => {
+    setGameState(prev => {
+        const newAiState = { ...prev.ai };
+        placeAllShipsRandomly(newAiState, prev.settings.boardSize);
+        newAiState.identifiedShips = identifyShips(newAiState.board);
+        newAiState.attacks = calculateAttacks(newAiState.identifiedShips);
+        
+        const newPlayerState = {...prev.player};
+        newPlayerState.identifiedShips = identifyShips(newPlayerState.board);
+        newPlayerState.attacks = calculateAttacks(newPlayerState.identifiedShips);
+
+        return {
+            ...prev,
+            phase: "playing",
+            placingShips: false,
+            ai: newAiState,
+            player: newPlayerState,
+            message: "All ships placed! Your turn to attack.",
+            selectedCellType: null,
+            turn: 'human',
+            attacksRemaining: newPlayerState.attacks,
+        };
+    });
+    toast({ title: "Fleet Deployed!", description: "Your ships are in position. Time to attack." });
+  }, [toast]);
+
   const placeShipsRandomly = useCallback(() => {
     setIsPlacingRandomly(true);
     setTimeout(() => {
@@ -646,8 +640,6 @@ export const useNebulaClash = () => {
             newAiState.identifiedShips = identifyShips(newAiState.board);
             newAiState.attacks = calculateAttacks(newAiState.identifiedShips);
 
-
-            toast({ title: "Fleets Deployed!", description: "Your random fleet is ready. Good luck." });
             return {
                 ...prev,
                 phase: "playing",
@@ -660,12 +652,13 @@ export const useNebulaClash = () => {
                 attacksRemaining: newPlayerState.attacks,
             };
         });
+        toast({ title: "Fleets Deployed!", description: "Your random fleet is ready. Good luck." });
         setIsPlacingRandomly(false);
     }, 500);
   }, [toast]);
 
   const handleCellClick = useCallback((row: number, col: number, boardOwner: Player) => {
-    const { phase, turn, placingShips, player } = gameState;
+    const { phase, turn, placingShips } = gameState;
 
     if (placingShips) {
       if (boardOwner === 'player') {
@@ -673,11 +666,8 @@ export const useNebulaClash = () => {
       }
     } else if (phase === 'playing' && turn === 'human' && boardOwner === 'ai') {
       handleAttack('human', row, col);
-      if(gameState.attacksRemaining - 1 <= 0) {
-          endTurn();
-      }
     }
-  }, [gameState, placeShipCell, handleAttack, endTurn]);
+  }, [gameState, placeShipCell, handleAttack]);
 
   return { gameState, startGame, selectCellType, handleCellClick, resetGame, placeShipsRandomly, isPlacingRandomly, finishPlacing };
 };
