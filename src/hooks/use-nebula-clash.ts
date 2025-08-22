@@ -105,7 +105,7 @@ const identifyShips = (board: Board): IdentifiedShip[] => {
                     newShip.cells.push(current);
                     const cell = board[current.row][current.col];
 
-                    if(cell.ship) {
+                    if(cell.ship && !cell.isHit) { // Only count parts on non-hit cells
                         if (cell.ship.type === CellType.Weapon) newShip.weaponCount++;
                         if (cell.ship.type === CellType.Ammo) newShip.ammoCount++;
                         if (cell.ship.type === CellType.Medical) newShip.medicalCount++;
@@ -149,7 +149,7 @@ export const useNebulaClash = () => {
           return total + Math.min(ship.weaponCount, ship.ammoCount);
       }, 0);
   }, []);
-  
+
   const checkWinner = useCallback((playerState: PlayerState, aiState: PlayerState): Player | undefined => {
     const playerShipsSunk = playerState.identifiedShips.length > 0 && playerState.identifiedShips.every(s => s.isSunk);
     const aiShipsSunk = aiState.identifiedShips.length > 0 && aiState.identifiedShips.every(s => s.isSunk);
@@ -187,15 +187,16 @@ export const useNebulaClash = () => {
             });
 
             // Decrement repair timers
-            for (const row of newBoard) {
-                for (const cell of row) {
-                    if (cell.repairTurnsLeft && cell.repairTurnsLeft > 0) {
-                        cell.repairTurnsLeft--;
-                        if (cell.repairTurnsLeft === 0) {
-                            cell.isHit = false;
-                        }
-                    }
+            for (let r = 0; r < newBoard.length; r++) {
+              for (let c = 0; c < newBoard[r].length; c++) {
+                const cell = newBoard[r][c];
+                if (cell.repairTurnsLeft && cell.repairTurnsLeft > 0) {
+                  cell.repairTurnsLeft--;
+                  if (cell.repairTurnsLeft === 0) {
+                    cell.isHit = false;
+                  }
                 }
+              }
             }
 
             newShips = identifyShips(newBoard);
@@ -225,14 +226,14 @@ export const useNebulaClash = () => {
     });
   }, [calculateAttacks]);
 
-  const handleAttack = useCallback((attacker: Player, row: number, col: number): boolean => {
+    const handleAttack = useCallback((attacker: Player, row: number, col: number): boolean => {
     let wasValidAttack = false;
     setGameState(prev => {
         const isHumanAttack = attacker === 'human';
         
         if (isHumanAttack && prev.attacksRemaining <= 0) {
             if (prev.phase === 'playing') {
-              toast({title: "Out of attacks", description: "You have no attacks left for this turn.", variant: "destructive"});
+              // toast({title: "Out of attacks", description: "You have no attacks left for this turn.", variant: "destructive"});
             }
             return prev;
         }
@@ -260,7 +261,7 @@ export const useNebulaClash = () => {
          if(isHumanAttack) {
             updatedState.attacksRemaining = prev.attacksRemaining - 1;
         } else {
-             updatedState.attacksRemaining = prev.attacksRemaining - 1;
+             updatedState.ai.attacks = prev.ai.attacks - 1;
         }
 
         setTimeout(() => {
@@ -300,20 +301,33 @@ export const useNebulaClash = () => {
                 }
 
                 const newTargetShips = identifyShips(board);
-                const newTargetState = {...currentTargetState, board: board, identifiedShips: newTargetShips, attacks: calculateAttacks(newTargetShips)};
+                const newAttacks = calculateAttacks(newTargetShips);
+                const newTargetState = {...currentTargetState, board: board, identifiedShips: newTargetShips, attacks: newAttacks};
                 
                 const winner = checkWinner(
                     isHumanAttack ? current.player : newTargetState,
                     isHumanAttack ? newTargetState : current.ai
                 );
-
-                let finalState: GameState = {
-                     ...current,
-                    [targetPlayerKey]: newTargetState,
-                    message,
-                    aiMemory: newAiMemory,
-                    lastAttack: { attacker, row, col, result: attackResult }
+                
+                let finalState: GameState;
+                if (isHumanAttack) {
+                    finalState = {
+                        ...current,
+                        ai: newTargetState, // AI is the target
+                        message,
+                        aiMemory: newAiMemory,
+                        lastAttack: { attacker, row, col, result: attackResult }
+                    };
+                } else {
+                     finalState = {
+                        ...current,
+                        player: newTargetState, // Player is the target
+                        message,
+                        aiMemory: newAiMemory,
+                        lastAttack: { attacker, row, col, result: attackResult }
+                    };
                 }
+
 
                 if (winner) {
                     finalState = {
@@ -322,8 +336,6 @@ export const useNebulaClash = () => {
                         winner,
                         message: winner === 'human' ? "Congratulations, you won!" : "The AI has defeated you.",
                     };
-                } else if(isHumanAttack && current.attacksRemaining <= 0) {
-                     // This is handled by useEffect now
                 }
 
                 return finalState;
@@ -423,14 +435,17 @@ export const useNebulaClash = () => {
   const handleAIturn = useCallback(async () => {
     setGameState(prev => ({ ...prev, message: "AI is thinking..." }));
 
-    const { settings, player: playerState, aiMemory } = gameState;
+    const { settings, player: playerState, aiMemory, ai } = gameState;
     const { board } = playerState;
     
     await new Promise(resolve => setTimeout(resolve, 500)); 
     const { move } = await getSmartMove(board, settings.boardSize, aiMemory, settings.difficulty);
 
     if (move) {
-        handleAttack("ai", move.row, move.col);
+        const isValid = handleAttack("ai", move.row, move.col);
+        if(!isValid) {
+            setGameState(prev => ({...prev, ai: {...prev.ai, attacks: prev.ai.attacks-1}}))
+        }
     } else {
         // No valid moves left, end turn
         endTurn();
@@ -613,16 +628,20 @@ export const useNebulaClash = () => {
   }, [placeAllShipsRandomly, finishPlacing, toast]);
   
   const handleCellClick = useCallback((row: number, col: number, boardOwner: Player) => {
-    const { phase, turn, placingShips } = gameState;
+    const { phase, turn, placingShips, attacksRemaining } = gameState;
 
     if (placingShips) {
       if (boardOwner === 'player') {
         placeShipCell(row, col);
       }
     } else if (phase === 'playing' && turn === 'human' && boardOwner === 'ai') {
-      handleAttack('human', row, col);
+        if(attacksRemaining > 0) {
+            handleAttack('human', row, col);
+        } else {
+            toast({ title: "Out of Attacks", description: "You have no attacks left this turn.", variant: "destructive" });
+        }
     }
-  }, [gameState, placeShipCell, handleAttack]);
+  }, [gameState, placeShipCell, handleAttack, toast]);
 
   const resetGame = useCallback(() => {
     localStorage.removeItem("nebulaClashState");
@@ -710,10 +729,12 @@ export const useNebulaClash = () => {
     if (gameState.lastAttack) {
       const { attacker, result } = gameState.lastAttack;
       if (result === 'hit') {
+        /*
         toast({
           title: "HIT!",
           description: `${attacker === 'human' ? 'You' : 'AI'} landed a hit.`,
         });
+        */
       }
     }
   }, [gameState.lastAttack, toast]);
@@ -729,7 +750,7 @@ export const useNebulaClash = () => {
   
   useEffect(() => {
     if (gameState.phase === "playing" && gameState.turn === "ai" && !gameState.winner) {
-        if (gameState.attacksRemaining > 0) {
+        if (gameState.ai.attacks > 0) {
             const aiTurnTimeout = setTimeout(() => {
                 handleAIturn();
             }, 1500);
@@ -741,7 +762,9 @@ export const useNebulaClash = () => {
             return () => clearTimeout(aiTurnEndTimeout);
         }
     }
-  }, [gameState.phase, gameState.turn, gameState.winner, gameState.attacksRemaining, handleAIturn, endTurn]);
+  }, [gameState.phase, gameState.turn, gameState.winner, gameState.ai.attacks, handleAIturn, endTurn]);
 
   return { gameState, startGame, selectCellType, handleCellClick, resetGame, placeShipsRandomly, isPlacingRandomly, finishPlacing, toggleDebugMode };
 };
+
+    
