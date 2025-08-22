@@ -2,7 +2,7 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import { IconAmmo, IconMedical, IconStructure, IconWeapon } from "@/components/icons";
+import { IconAmmo, IconMedical, IconStructure, IconEnergy, IconWeapon1x1, IconWeapon3x3, IconWeapon5x5 } from "@/components/icons";
 import { cn } from "@/lib/utils";
 import { CellType, PlayerState, SHIP_CELL_POINTS } from "@/types";
 import { Badge } from "@/components/ui/badge";
@@ -15,16 +15,22 @@ interface ShipPlacementPanelProps {
 
 const cellTypeIcons: Record<CellType, React.ElementType> = {
   [CellType.Simple]: IconStructure,
-  [CellType.Weapon]: IconWeapon,
+  [CellType.Weapon1x1]: IconWeapon1x1,
+  [CellType.Weapon3x3]: IconWeapon3x3,
+  [CellType.Weapon5x5]: IconWeapon5x5,
   [CellType.Ammo]: IconAmmo,
   [CellType.Medical]: IconMedical,
+  [CellType.Energy]: IconEnergy,
 };
 
 const cellTypeNames: Record<CellType, string> = {
     [CellType.Simple]: "Structure",
-    [CellType.Weapon]: "Weapon",
+    [CellType.Weapon1x1]: "Weapon 1x1",
+    [CellType.Weapon3x3]: "Weapon 3x3",
+    [CellType.Weapon5x5]: "Weapon 5x5",
     [CellType.Ammo]: "Ammo",
     [CellType.Medical]: "Medical",
+    [CellType.Energy]: "Energy",
 };
 
 const cellTypes = Object.values(CellType);

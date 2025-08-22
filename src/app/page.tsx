@@ -5,10 +5,12 @@ import { useNebulaClash } from "@/hooks/use-nebula-clash";
 import GameBoard from "@/components/game-board";
 import SetupDialog from "@/components/setup-dialog";
 import ShipPlacementPanel from "@/components/ship-placement-panel";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Rocket, Dices, RotateCcw, CheckSquare, Target, Bug } from "lucide-react";
+import { Rocket, Dices, RotateCcw, CheckSquare, Target, Bug, Zap, Bomb } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
+import { CellType, WEAPON_SPECS, WEAPON_TYPES } from "@/types";
 
 export default function Home() {
   const {
@@ -21,6 +23,8 @@ export default function Home() {
     isPlacingRandomly,
     finishPlacing,
     toggleDebugMode,
+    chargeWeapon,
+    endTurn
   } = useNebulaClash();
 
   if (gameState.phase === "setup") {
@@ -29,7 +33,76 @@ export default function Home() {
 
   const isSetupPhase = gameState.phase === 'setup';
 
-  const attacksRemaining = gameState.turn === 'human' ? gameState.attacksRemaining : gameState.ai.attacks;
+  const renderPlayerControls = () => {
+    if (gameState.winner) return null;
+    if (gameState.placingShips) {
+       return (
+        <div className="flex flex-col gap-4">
+            <ShipPlacementPanel
+              playerState={gameState.player}
+              selectedCellType={gameState.selectedCellType}
+              onSelectCellType={selectCellType}
+            />
+            <Button onClick={placeShipsRandomly} disabled={isPlacingRandomly}>
+              <Dices className="mr-2 h-4 w-4" />
+              {isPlacingRandomly ? 'Placing...' : 'Place Randomly'}
+            </Button>
+            <Button onClick={finishPlacing} variant="default" className="bg-accent hover:bg-accent/90">
+              <CheckSquare className="mr-2 h-4 w-4" />
+              Finish Placing
+            </Button>
+          </div>
+       )
+    }
+
+    return (
+      <div className="flex flex-col gap-4">
+        <div>
+          <h3 className="font-headline text-lg mb-2">Weapons Control</h3>
+           <div className="flex justify-between items-center bg-secondary p-2 rounded-md mb-2">
+                <div className="flex items-center gap-2">
+                    <Bomb className="w-5 h-5 text-accent"/>
+                    <span className="font-semibold">Ammo</span>
+                </div>
+                <span className="text-xl font-bold">{gameState.player.totalAmmo}</span>
+            </div>
+          {gameState.player.identifiedShips.flatMap(ship => ship.weapons).map(weapon => {
+            const spec = WEAPON_SPECS[weapon.type as keyof typeof WEAPON_SPECS];
+            const charge = weapon.ammoCharge || 0;
+            const isReady = charge >= spec.ammoCost;
+            return (
+              <Card key={weapon.id} className={`p-3 mb-2 ${gameState.selectedWeaponId === weapon.id ? 'border-accent' : ''}`}>
+                 <div className="flex justify-between items-center">
+                   <p className="font-semibold">Weapon {weapon.type.replace('weapon', '')}</p>
+                   <Badge variant={isReady ? 'default' : 'secondary'}>{isReady ? 'Ready' : 'Charging'}</Badge>
+                 </div>
+                 <Progress value={(charge / spec.ammoCost) * 100} className="my-2" />
+                 <p className="text-sm text-muted-foreground text-center mb-2">Charge: {charge} / {spec.ammoCost}</p>
+                 <div className="flex gap-2">
+                    <Button 
+                        size="sm" 
+                        variant="outline"
+                        className="flex-1"
+                        onClick={() => chargeWeapon(weapon.id, 1)}
+                        disabled={gameState.player.totalAmmo < 1 || charge >= spec.ammoCost}
+                    >+1 Ammo</Button>
+                     <Button 
+                        size="sm" 
+                        variant="outline"
+                        className="flex-1"
+                        onClick={() => chargeWeapon(weapon.id, 5)}
+                        disabled={gameState.player.totalAmmo < 5 || charge >= spec.ammoCost}
+                    >+5 Ammo</Button>
+                 </div>
+              </Card>
+            )
+          })}
+        </div>
+        <Button onClick={endTurn} variant="destructive">End Turn</Button>
+      </div>
+    )
+
+  }
 
   return (
     <div className="min-h-screen bg-background text-foreground p-4 sm:p-6 lg:p-8 flex flex-col items-center">
@@ -59,6 +132,7 @@ export default function Home() {
                 ships={gameState.player.identifiedShips}
                 onCellClick={(row, col) => handleCellClick(row, col, 'player')}
                 isPlayerBoard={true}
+                selectedWeaponId={gameState.selectedWeaponId}
               />
             </CardContent>
           </Card>
@@ -103,36 +177,14 @@ export default function Home() {
                 <>
                   <div className="text-center p-4 rounded-lg bg-secondary">
                     <p className="text-lg font-semibold font-headline">
-                      {gameState.turn === "human" ? "Your Turn" : `Enemy's Turn (${gameState.ai.attacks} attacks)`}
+                      {gameState.turn === "human" ? "Your Turn" : `Enemy's Turn`}
                     </p>
-                     {gameState.turn === 'human' && (
-                        <div className="flex items-center justify-center gap-2 mt-2">
-                            <Target className="w-5 h-5 text-accent"/>
-                            <p className="text-xl font-bold">{attacksRemaining} Attacks Remaining</p>
-                        </div>
-                    )}
                     <p className="text-muted-foreground mt-1 h-5">
                       {gameState.message}
                     </p>
                   </div>
 
-                  {gameState.placingShips && (
-                    <div className="flex flex-col gap-4">
-                      <ShipPlacementPanel
-                        playerState={gameState.player}
-                        selectedCellType={gameState.selectedCellType}
-                        onSelectCellType={selectCellType}
-                      />
-                       <Button onClick={placeShipsRandomly} disabled={isPlacingRandomly}>
-                        <Dices className="mr-2 h-4 w-4" />
-                        {isPlacingRandomly ? 'Placing...' : 'Place Randomly'}
-                      </Button>
-                      <Button onClick={finishPlacing} variant="default" className="bg-accent hover:bg-accent/90">
-                        <CheckSquare className="mr-2 h-4 w-4" />
-                        Finish Placing
-                      </Button>
-                    </div>
-                  )}
+                  {renderPlayerControls()}
                 </>
               )}
 
@@ -144,17 +196,6 @@ export default function Home() {
                 <div className="bg-secondary p-2 rounded-md">
                     <p className="text-sm text-muted-foreground">Board Size</p>
                     <p className="font-semibold">{gameState.settings.boardSize}x{gameState.settings.boardSize}</p>
-                </div>
-                 <div className="bg-secondary p-2 rounded-md col-span-2">
-                    <p className="text-sm text-muted-foreground">Fleet Points</p>
-                    <p className="font-semibold">{gameState.player.points} / {gameState.settings.initialPoints}</p>
-                </div>
-                 <div className="bg-secondary p-2 rounded-md col-span-2">
-                    <p className="text-sm text-muted-foreground">Player Attacks</p>
-                    <div className="flex justify-center items-center gap-2">
-                        <Target className="w-4 h-4 text-accent" />
-                        <p className="font-semibold">{gameState.player.attacks}</p>
-                    </div>
                 </div>
               </div>
                <Button onClick={toggleDebugMode} variant="outline" size="sm">

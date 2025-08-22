@@ -3,28 +3,39 @@ export type Player = "human" | "ai";
 
 export enum CellType {
   Simple = "simple",
-  Weapon = "weapon",
+  Weapon1x1 = "weapon1x1",
+  Weapon3x3 = "weapon3x3",
+  Weapon5x5 = "weapon5x5",
   Ammo = "ammo",
   Medical = "medical",
+  Energy = "energy",
 }
 
-export const SHIP_CELL_HEALTH: Record<CellType, number> = {
-  [CellType.Simple]: 1,
-  [CellType.Weapon]: 2,
-  [CellType.Ammo]: 1,
-  [CellType.Medical]: 2,
-};
+export const WEAPON_TYPES = [CellType.Weapon1x1, CellType.Weapon3x3, CellType.Weapon5x5];
 
 export const SHIP_CELL_POINTS: Record<CellType, number> = {
     [CellType.Simple]: 1,
-    [CellType.Weapon]: 6,
+    [CellType.Weapon1x1]: 4,
+    [CellType.Weapon3x3]: 8,
+    [CellType.Weapon5x5]: 12,
     [CellType.Ammo]: 4,
     [CellType.Medical]: 3,
+    [CellType.Energy]: 5,
+};
+
+export const WEAPON_SPECS: Record<string, { area: number; ammoCost: number; energyCost: number }> = {
+    [CellType.Weapon1x1]: { area: 1, ammoCost: 1, energyCost: 1 },
+    [CellType.Weapon3x3]: { area: 3, ammoCost: 3, energyCost: 2 },
+    [CellType.Weapon5x5]: { area: 5, ammoCost: 5, energyCost: 3 },
 };
 
 export interface ShipCell {
   type: CellType;
   health: number;
+  id: string; // Unique ID for each cell
+  shipId?: number;
+  ammoCharge?: number;
+  isEnergized?: boolean;
 }
 
 export type CellState = {
@@ -51,9 +62,17 @@ export interface IdentifiedShip {
     id: number;
     cells: { row: number, col: number }[];
     isSunk: boolean;
-    weaponCount: number;
-    ammoCount: number;
-    medicalCount: number;
+    
+    // New properties for resource management
+    energyProducers: ShipCell[];
+    energyConsumers: ShipCell[];
+    ammoProducers: ShipCell[];
+    weapons: ShipCell[];
+    medicalBays: ShipCell[];
+    
+    producedEnergy: number;
+    consumedEnergy: number;
+    producedAmmo: number;
 }
 
 export interface PlayerState {
@@ -61,8 +80,11 @@ export interface PlayerState {
     points: number;
     totalPoints: number;
     ships: { type: CellType; count: number }[];
-    attacks: number;
     identifiedShips: IdentifiedShip[];
+    
+    // Player-level resource pools
+    totalAmmo: number;
+    totalEnergy: number;
 }
 
 export interface GameState {
@@ -84,11 +106,14 @@ export interface GameState {
   };
   lastAttack: {
     attacker: Player;
-    row: number;
-    col: number;
+    cells: {row: number, col: number}[];
     result: 'hit' | 'miss';
   } | null;
   attacksRemaining: number;
   turnNumber: number;
   debug: boolean;
+
+  // State for targeting and resource allocation
+  selectedWeaponId: string | null;
+  targetedCell: {row: number, col: number} | null;
 }

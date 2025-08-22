@@ -1,10 +1,10 @@
 
 "use client";
 
-import { Board, CellType, IdentifiedShip } from "@/types";
+import { Board, CellType, IdentifiedShip, WEAPON_TYPES } from "@/types";
 import { cn } from "@/lib/utils";
-import { IconAmmo, IconMedical, IconStructure, IconWeapon } from "./icons";
-import { Flame, X, ShieldQuestion, Wrench } from "lucide-react";
+import { IconAmmo, IconMedical, IconStructure, IconEnergy, IconWeapon1x1, IconWeapon3x3, IconWeapon5x5 } from "./icons";
+import { Flame, X, ShieldQuestion, Wrench, Zap } from "lucide-react";
 import {
   Tooltip,
   TooltipContent,
@@ -18,13 +18,17 @@ interface GameBoardProps {
   onCellClick: (row: number, col: number) => void;
   isPlayerBoard: boolean;
   debug?: boolean;
+  selectedWeaponId?: string | null;
 }
 
-const cellTypeIcons: Record<CellType, React.ElementType> = {
+const cellTypeIcons: Record<string, React.ElementType> = {
   [CellType.Simple]: IconStructure,
-  [CellType.Weapon]: IconWeapon,
+  [CellType.Weapon1x1]: IconWeapon1x1,
+  [CellType.Weapon3x3]: IconWeapon3x3,
+  [CellType.Weapon5x5]: IconWeapon5x5,
   [CellType.Ammo]: IconAmmo,
   [CellType.Medical]: IconMedical,
+  [CellType.Energy]: IconEnergy,
 };
 
 const getBorderClasses = (row: number, col: number, ships: IdentifiedShip[]) => {
@@ -58,7 +62,7 @@ const getBorderClasses = (row: number, col: number, ships: IdentifiedShip[]) => 
   return classes.join(" ");
 }
 
-export default function GameBoard({ board, ships, onCellClick, isPlayerBoard, debug = false }: GameBoardProps) {
+export default function GameBoard({ board, ships, onCellClick, isPlayerBoard, debug = false, selectedWeaponId }: GameBoardProps) {
   const boardSize = board.length;
 
   return (
@@ -71,6 +75,7 @@ export default function GameBoard({ board, ships, onCellClick, isPlayerBoard, de
           row.map((cell, colIndex) => {
             const Icon = cell.ship ? cellTypeIcons[cell.ship.type] : null;
             const borderClasses = (isPlayerBoard || debug) ? getBorderClasses(rowIndex, colIndex, ships) : "";
+            const isSelectedWeapon = isPlayerBoard && selectedWeaponId === cell.ship?.id;
 
             const cellContent = (
               <button
@@ -81,10 +86,11 @@ export default function GameBoard({ board, ships, onCellClick, isPlayerBoard, de
                   "relative flex items-center justify-center aspect-square transition-all duration-200",
                   "bg-secondary/20 hover:bg-secondary/50",
                   borderClasses,
+                  isSelectedWeapon && "ring-2 ring-accent ring-offset-2 ring-offset-background z-10",
                   cell.animation === "hit" && "hit-animation",
                   cell.animation === "miss" && "miss-animation",
-                  isPlayerBoard ? "cursor-default" : "cursor-crosshair",
-                  (cell.isHit || cell.isMiss) && 'cursor-not-allowed'
+                  isPlayerBoard ? (WEAPON_TYPES.includes(cell.ship?.type || '') ? "cursor-pointer" : "cursor-default") : "cursor-crosshair",
+                  (!isPlayerBoard && (cell.isHit || cell.isMiss)) && 'cursor-not-allowed'
                 )}
                 aria-label={`Cell ${rowIndex}, ${colIndex}`}
               >
@@ -102,6 +108,12 @@ export default function GameBoard({ board, ships, onCellClick, isPlayerBoard, de
                 {(isPlayerBoard || debug) && cell.ship && !cell.isHit && (
                   <>
                   <Icon className={cn("w-2/3 h-2/3", isPlayerBoard ? "text-primary-foreground/80" : "text-accent-foreground/50")} />
+                  {cell.ship.isEnergized === false && (
+                    <div className="absolute inset-0 bg-black/50" />
+                  )}
+                   {cell.ship.isEnergized && (
+                    <Zap className="absolute top-0 right-0 w-3 h-3 text-yellow-400" />
+                  )}
                   {cell.repairTurnsLeft && cell.repairTurnsLeft > 0 && (
                       <div className="absolute inset-0 flex items-center justify-center bg-blue-500/50">
                           <Wrench className="w-1/2 h-1/2 text-white animate-spin" style={{ animationDuration: '3s' }} />
@@ -123,13 +135,24 @@ export default function GameBoard({ board, ships, onCellClick, isPlayerBoard, de
 
               </button>
             );
+            
+            let tooltipContent = null;
+            if(isPlayerBoard && cell.ship && !cell.isHit) {
+                if(cell.repairTurnsLeft && cell.repairTurnsLeft > 0) {
+                    tooltipContent = `Repairing... ${cell.repairTurnsLeft} turns left.`;
+                } else if (cell.ship.isEnergized === false) {
+                    tooltipContent = "Not energized.";
+                } else if (WEAPON_TYPES.includes(cell.ship.type)) {
+                    tooltipContent = `Ammo: ${cell.ship.ammoCharge || 0}`;
+                }
+            }
 
-            if (isPlayerBoard && cell.repairTurnsLeft && cell.repairTurnsLeft > 0) {
+            if (tooltipContent) {
               return (
                 <Tooltip key={`${rowIndex}-${colIndex}-tooltip`}>
                   <TooltipTrigger asChild>{cellContent}</TooltipTrigger>
                   <TooltipContent>
-                    <p>Repairing... {cell.repairTurnsLeft} turns left.</p>
+                    <p>{tooltipContent}</p>
                   </TooltipContent>
                 </Tooltip>
               )
