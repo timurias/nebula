@@ -57,7 +57,12 @@ export interface GameState {
   aiMemory: {
     lastHit: { row: number; col: number } | null;
     huntDirection: 'up' | 'down' | 'left' | 'right' | null;
+    potentialTargets: { row: number; col: number }[];
   };
+  lastAttack: {
+    attacker: Player;
+    row: number;
+    col: number;
+    result: 'hit' | 'miss';
+  } | null;
 }
-
-    

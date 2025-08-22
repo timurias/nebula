@@ -3,14 +3,13 @@
 
 import { useState, useEffect, useCallback } from "react";
 import {
-  type GameState,
-  type GameSettings,
-  type Player,
-  type Board,
-  type CellState,
+  GameState,
+  GameSettings,
+  Player,
+  Board,
   CellType,
-  type BoardSize,
-  type PlayerState,
+  BoardSize,
+  PlayerState,
 } from "@/types";
 import { adjustAIDifficulty } from "@/ai/flows/ai-difficulty-adjustment";
 import { evaluateMove } from "@/ai/flows/ai-opponent-move-evaluation";
@@ -32,7 +31,9 @@ const getInitialState = (): GameState => ({
   aiMemory: {
     lastHit: null,
     huntDirection: null,
-  }
+    potentialTargets: [],
+  },
+  lastAttack: null,
 });
 
 function createEmptyBoard(size: BoardSize): Board {
@@ -44,8 +45,7 @@ function createEmptyBoard(size: BoardSize): Board {
   );
 }
 
-function getShipCounts(boardSize: BoardSize): { type: CellType, count: number, total: number }[] {
-    const totalCells = { 5: 5, 10: 15, 15: 30 }[boardSize];
+function getShipCounts(boardSize: BoardSize): { type: CellType; count: number; total: number }[] {
     const counts = {
         5: { weapon: 1, ammo: 1, medical: 1, simple: 2},
         10: { weapon: 2, ammo: 3, medical: 2, simple: 8},
@@ -80,7 +80,6 @@ export const useNebulaClash = () => {
       const savedState = localStorage.getItem("nebulaClashState");
       if (savedState) {
         const parsedState = JSON.parse(savedState);
-        // Basic validation
         if(parsedState.phase && parsedState.settings) {
             setGameState(parsedState);
         } else {
@@ -107,8 +106,14 @@ export const useNebulaClash = () => {
   const startGame = useCallback(async (settings: GameSettings) => {
     toast({ title: "Starting New Game", description: `Board: ${settings.boardSize}x${settings.boardSize}, AI: ${settings.difficulty}` });
     
-    await adjustAIDifficulty({ difficulty: settings.difficulty });
-    toast({ title: "AI Calibrated", description: `Opponent difficulty set to ${settings.difficulty}.` });
+    try {
+      await adjustAIDifficulty({ difficulty: settings.difficulty });
+      toast({ title: "AI Calibrated", description: `Opponent difficulty set to ${settings.difficulty}.` });
+    } catch (e) {
+      console.error("Failed to adjust AI difficulty", e);
+      toast({ title: "AI Error", description: "Could not set AI difficulty. Using default.", variant: "destructive"});
+    }
+
 
     const playerState = createEmptyPlayerState(settings.boardSize);
     const aiState = createEmptyPlayerState(settings.boardSize);
@@ -139,84 +144,100 @@ export const useNebulaClash = () => {
         return prev;
     });
   }, []);
+  
+  const getSmartMove = (board: Board, size: number, aiMemory: GameState['aiMemory']) => {
+    let targets = [...aiMemory.potentialTargets];
 
-  const getSmartMove = (playerBoard: Board, boardSize: number, lastHit: {row: number, col: number} | null) => {
-    const possibleMoves: { row: number; col: number }[] = [];
-    if(lastHit) {
-      // search adjacent cells
-      const {row, col} = lastHit;
-      const adjacent = [
-        {row: row - 1, col}, {row: row + 1, col},
-        {row, col: col - 1}, {row, col: col + 1}
-      ];
-      for(const move of adjacent) {
-        if(move.row >=0 && move.row < boardSize && move.col >= 0 && move.col < boardSize && !playerBoard[move.row][move.col].isHit && !playerBoard[move.row][move.col].isMiss) {
-          possibleMoves.push(move);
+    // If we have a hunt direction, prioritize that
+    if (aiMemory.lastHit && aiMemory.huntDirection) {
+        const {row, col} = aiMemory.lastHit;
+        const directions = {
+            up: {r: -1, c: 0},
+            down: {r: 1, c: 0},
+            left: {r: 0, c: -1},
+            right: {r: 0, c: 1}
+        };
+        const dir = directions[aiMemory.huntDirection];
+        const nextCell = {row: row + dir.r, col: col + dir.c};
+        if(nextCell.row >= 0 && nextCell.row < size && nextCell.col >= 0 && nextCell.col < size && !board[nextCell.row][nextCell.col].isHit && !board[nextCell.row][nextCell.col].isMiss){
+             targets.unshift(nextCell); // Prioritize this move
         }
-      }
     }
-
-    if(possibleMoves.length > 0) {
-      return possibleMoves[Math.floor(Math.random() * possibleMoves.length)];
+    
+    // If no priority targets, use the list of potential targets
+    while(targets.length > 0) {
+        const move = targets.shift(); // Takes the highest priority
+        if(move && !board[move.row][move.col].isHit && !board[move.row][move.col].isMiss) {
+            return { move, updatedTargets: targets };
+        }
     }
-
-    // fallback to random if no smart moves
+    
+    // Fallback to random if no smart moves
     const allPossible : { row: number; col: number }[] = [];
-    for (let r = 0; r < boardSize; r++) {
-      for (let c = 0; c < boardSize; c++) {
-        if (!playerBoard[r][c].isHit && !playerBoard[r][c].isMiss) {
+    for (let r = 0; r < size; r++) {
+      for (let c = 0; c < size; c++) {
+        if (!board[r][c].isHit && !board[r][c].isMiss) {
           allPossible.push({ row: r, col: c });
         }
       }
     }
-    if (allPossible.length === 0) return null;
-    return allPossible[Math.floor(Math.random() * allPossible.length)];
+    if (allPossible.length === 0) return { move: null, updatedTargets: [] };
+    const move = allPossible[Math.floor(Math.random() * allPossible.length)];
+    return { move, updatedTargets: [] };
   }
+
 
   const handleAIturn = useCallback(async () => {
     setGameState(prev => ({...prev, message: "AI is thinking..."}));
 
     const { settings, ai: aiState, player: playerState, aiMemory } = gameState;
-    const possibleMoves: { row: number; col: number }[] = [];
-    for (let r = 0; r < settings.boardSize; r++) {
-      for (let c = 0; c < settings.boardSize; c++) {
-        if (!playerState.board[r][c].isHit && !playerState.board[r][c].isMiss) {
-          possibleMoves.push({ row: r, col: c });
-        }
-      }
-    }
-
-    if (possibleMoves.length === 0) return;
-
-    let move: { row: number; col: number } | null;
+    const {board, boardSize} = {board: playerState.board, boardSize: settings.boardSize};
+    
+    let move: { row: number; col: number } | null = null;
+    let updatedTargets = aiMemory.potentialTargets;
 
     if (settings.difficulty === 'easy') {
-        move = possibleMoves[Math.floor(Math.random() * possibleMoves.length)];
-    } else { // medium and hard logic
-        move = getSmartMove(playerState.board, settings.boardSize, aiMemory.lastHit);
-
-        // For 'hard' difficulty, we can enhance with a single LLM call for a strategic check
-        if (settings.difficulty === 'hard' && move) {
-            const boardState = JSON.stringify(playerState.board.map(r => r.map(c => c.isHit ? 'H' : (c.isMiss ? 'M' : 'E'))));
-            const moveStr = `${String.fromCharCode(65 + move.row)}${move.col + 1}`;
-            try {
-                const res = await evaluateMove({ boardState, move: moveStr, opponentBoard: "N/A" });
-                // The LLM can double-check our choice. If it's not a high-value move, we can try another random one.
-                // This is a simple integration, a more complex one could ask the LLM for the best move directly.
-                if (!res.isHighValue) {
-                   const randomMove = possibleMoves[Math.floor(Math.random() * possibleMoves.length)];
-                   move = randomMove;
+        const allPossible : { row: number; col: number }[] = [];
+        for (let r = 0; r < boardSize; r++) {
+            for (let c = 0; c < boardSize; c++) {
+                if (!board[r][c].isHit && !board[r][c].isMiss) {
+                    allPossible.push({ row: r, col: c });
                 }
-            } catch (e) {
-                console.error("AI evaluation failed, proceeding with smart move", e);
             }
+        }
+        if (allPossible.length > 0) {
+             move = allPossible[Math.floor(Math.random() * allPossible.length)];
+        }
+    } else { // medium and hard logic
+        const result = getSmartMove(board, boardSize, aiMemory);
+        move = result.move;
+        updatedTargets = result.updatedTargets;
+    }
+
+    if (settings.difficulty === 'hard' && move) {
+        try {
+            const boardStateStr = JSON.stringify(board.map(r => r.map(c => c.isHit ? 'H' : (c.isMiss ? 'M' : 'E'))));
+            const moveStr = `${String.fromCharCode(65 + move.row)}${move.col + 1}`;
+            const res = await evaluateMove({ boardState: boardStateStr, move: moveStr, opponentBoard: "N/A" });
+            if (!res.isHighValue) {
+                // If the model thinks it's a bad move, maybe try the next in the smart list or a random one
+                const fallbackResult = getSmartMove(board, boardSize, {...aiMemory, potentialTargets: updatedTargets});
+                move = fallbackResult.move;
+                updatedTargets = fallbackResult.updatedTargets;
+            }
+        } catch (e) {
+            console.error("AI evaluation failed, proceeding with smart move", e);
         }
     }
 
     if(move) {
+      const finalMove = move;
+      setGameState(prev => ({...prev, aiMemory: { ...prev.aiMemory, potentialTargets: updatedTargets }}));
       setTimeout(() => {
-          handleAttack("ai", move!.row, move!.col);
+          handleAttack("ai", finalMove.row, finalMove.col);
       }, 1000);
+    } else {
+       setGameState(prev => ({...prev, turn: 'human', message: "AI has no moves left."}));
     }
 
   }, [gameState]);
@@ -231,6 +252,18 @@ export const useNebulaClash = () => {
     }
   }, [gameState.phase, gameState.turn, gameState.winner, handleAIturn]);
 
+  useEffect(() => {
+    if (gameState.lastAttack) {
+      const { attacker, row, col, result } = gameState.lastAttack;
+      if (result === 'hit') {
+        toast({ 
+          title: "HIT!", 
+          description: `${attacker === 'human' ? 'You' : 'AI'} landed a hit at ${String.fromCharCode(65 + row)}${col + 1}.`, 
+          className: "bg-accent border-accent text-accent-foreground" 
+        });
+      }
+    }
+  }, [gameState.lastAttack, toast]);
 
   const checkWinner = (playerBoard: Board, aiBoard: Board): Player | undefined => {
     const allPlayerShipsDestroyed = playerBoard.flat().filter(c => c.ship).every(c => c.isHit);
@@ -253,42 +286,58 @@ export const useNebulaClash = () => {
           const newBoard = JSON.parse(JSON.stringify(targetState.board));
           const cell = newBoard[row][col];
           
-          let message = "";
-          let newGameState: Partial<GameState> = {};
-          
           if(cell.isHit || cell.isMiss) {
               if(isHumanAttack) toast({ title: "Wasted Shot!", description: "You've already fired at this location.", variant: "destructive"});
-              return prev; // Invalid move
+              return prev;
           }
           
           const animationType = cell.ship ? "hit" : "miss";
           newBoard[row][col] = {...cell, animation: animationType };
 
           const updatedState = { ...prev };
-          updatedState[targetPlayerKey].board = newBoard;
+          updatedState[targetPlayerKey] = { ...targetState, board: newBoard };
           
-          setGameState(updatedState);
-
           setTimeout(() => {
               setGameState(current => {
                     let newAiMemory = {...current.aiMemory};
                     const currentTargetState = current[targetPlayerKey];
                     const board = JSON.parse(JSON.stringify(currentTargetState.board));
                     const cell = board[row][col];
+                    const boardSize = current.settings.boardSize;
+                    
                     delete cell.animation;
+                    let message = "";
+                    let attackResult: 'hit' | 'miss' = 'miss';
 
                     if (cell.ship) {
                         cell.isHit = true;
+                        attackResult = 'hit';
                         message = `${attacker === "human" ? "You" : "AI"} scored a HIT!`;
-                        toast({ title: "HIT!", description: `Direct impact at ${String.fromCharCode(65 + row)}${col + 1}.`, className: "bg-accent border-accent text-accent-foreground" });
-                        if(!isHumanAttack) {
+                        
+                        if(!isHumanAttack) { // AI's turn
+                          const newTargets: {row: number, col: number}[] = [];
+                          const directions = [{r: -1, c: 0, d: 'up'}, {r: 1, c: 0, d: 'down'}, {r: 0, c: -1, d: 'left'}, {r: 0, c: 1, d: 'right'}];
+                          
+                          if(!current.aiMemory.lastHit || current.aiMemory.huntDirection) { // First hit of a new ship
+                              newAiMemory.huntDirection = null; 
+                              directions.forEach(dir => {
+                                  const nextR = row + dir.r;
+                                  const nextC = col + dir.c;
+                                  if(nextR >= 0 && nextR < boardSize && nextC >= 0 && nextC < boardSize && !board[nextR][nextC].isHit && !board[nextR][nextC].isMiss) {
+                                      newTargets.push({row: nextR, col: nextC});
+                                  }
+                              });
+                          }
                           newAiMemory.lastHit = {row, col};
+                          newAiMemory.potentialTargets = [...newTargets, ...current.aiMemory.potentialTargets.filter(t => t.row !== row || t.col !== col)];
                         }
+
                     } else {
                         cell.isMiss = true;
                         message = `${attacker === "human" ? "You" : "AI"} missed.`;
-                         if(!isHumanAttack) {
-                          newAiMemory.lastHit = null; // reset after a miss
+                        if(!isHumanAttack && newAiMemory.lastHit) {
+                           // If AI was hunting, this miss might inform its next move.
+                           newAiMemory.potentialTargets = newAiMemory.potentialTargets.filter(t => t.row !== row || t.col !== col)
                         }
                     }
 
@@ -304,6 +353,7 @@ export const useNebulaClash = () => {
                             phase: "over",
                             winner,
                             message: winner === 'human' ? "Congratulations, you won!" : "The AI has defeated you.",
+                            lastAttack: { attacker, row, col, result: attackResult }
                         };
                     }
 
@@ -312,12 +362,13 @@ export const useNebulaClash = () => {
                         [targetPlayerKey]: { ...currentTargetState, board },
                         turn: isHumanAttack ? 'ai' : 'human',
                         message,
-                        aiMemory: newAiMemory
+                        aiMemory: newAiMemory,
+                        lastAttack: { attacker, row, col, result: attackResult }
                     };
                 });
           }, 750);
-
-          return prev;
+          
+          return updatedState;
       });
   }, [toast]);
 
@@ -350,10 +401,10 @@ export const useNebulaClash = () => {
         }
 
         if (isDonePlacing) {
-            // AI places its ships randomly
             const newAiState = { ...prev.ai };
             placeAllShipsRandomly(newAiState, prev.settings.boardSize);
             
+            toast({ title: "Fleet Deployed!", description: "Your ships are in position. Time to attack." });
             return {
                 ...prev,
                 phase: "playing",
@@ -381,6 +432,7 @@ export const useNebulaClash = () => {
             placeAllShipsRandomly(newAiState, prev.settings.boardSize);
 
             setIsPlacingRandomly(false);
+            toast({ title: "Fleets Deployed!", description: "Your random fleet is ready. Good luck." });
             return {
                 ...prev,
                 phase: "playing",
@@ -393,7 +445,7 @@ export const useNebulaClash = () => {
             };
         });
     }, 500);
-  }, []);
+  }, [toast]);
 
   const placeAllShipsRandomly = (playerState: PlayerState, boardSize: BoardSize) => {
     playerState.board = createEmptyBoard(boardSize);
@@ -425,5 +477,3 @@ export const useNebulaClash = () => {
 
   return { gameState, startGame, selectCellType, handleCellClick, resetGame, placeShipsRandomly, isPlacingRandomly };
 };
-
-    
