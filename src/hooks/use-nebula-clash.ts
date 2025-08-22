@@ -211,8 +211,12 @@ export const useNebulaClash = () => {
 
   const handleAttack = useCallback((attacker: Player, row: number, col: number) => {
       setGameState(prev => {
-          const targetPlayer = attacker === 'human' ? 'ai' : 'human';
-          const targetState = prev[targetPlayer];
+          const isHumanAttack = attacker === 'human';
+          const targetPlayerKey = isHumanAttack ? 'ai' : 'player';
+          const targetState = prev[targetPlayerKey];
+
+          if (!targetState) return prev; // Should not happen with correct keys
+
           const newBoard = JSON.parse(JSON.stringify(targetState.board));
           const cell = newBoard[row][col];
           
@@ -220,7 +224,7 @@ export const useNebulaClash = () => {
           let newGameState: Partial<GameState> = {};
           
           if(cell.isHit || cell.isMiss) {
-              if(attacker === 'human') toast({ title: "Wasted Shot!", description: "You've already fired at this location.", variant: "destructive"});
+              if(isHumanAttack) toast({ title: "Wasted Shot!", description: "You've already fired at this location.", variant: "destructive"});
               return prev; // Invalid move
           }
           
@@ -228,14 +232,14 @@ export const useNebulaClash = () => {
           newBoard[row][col] = {...cell, animation: animationType };
 
           const updatedState = { ...prev };
-          if(targetPlayer === 'ai') updatedState.ai.board = newBoard; else updatedState.player.board = newBoard;
+          updatedState[targetPlayerKey].board = newBoard;
           
           setGameState(updatedState);
 
           setTimeout(() => {
               setGameState(current => {
-                    const targetState = current[targetPlayer];
-                    const board = JSON.parse(JSON.stringify(targetState.board));
+                    const currentTargetState = current[targetPlayerKey];
+                    const board = JSON.parse(JSON.stringify(currentTargetState.board));
                     const cell = board[row][col];
                     delete cell.animation;
 
@@ -248,12 +252,15 @@ export const useNebulaClash = () => {
                         message = `${attacker === "human" ? "You" : "AI"} missed.`;
                     }
 
-                    const winner = checkWinner(targetPlayer === 'human' ? board : current.player.board, targetPlayer === 'ai' ? board : current.ai.board);
+                    const winner = checkWinner(
+                        isHumanAttack ? current.player.board : board, 
+                        isHumanAttack ? board : current.ai.board
+                    );
                     
                     if (winner) {
                         return {
                             ...current,
-                            [targetPlayer]: { ...targetState, board },
+                            [targetPlayerKey]: { ...currentTargetState, board },
                             phase: "over",
                             winner,
                             message: winner === 'human' ? "Congratulations, you won!" : "The AI has defeated you.",
@@ -262,8 +269,8 @@ export const useNebulaClash = () => {
 
                     return {
                         ...current,
-                        [targetPlayer]: { ...targetState, board },
-                        turn: targetPlayer,
+                        [targetPlayerKey]: { ...currentTargetState, board },
+                        turn: isHumanAttack ? 'ai' : 'human',
                         message,
                     };
                 });
