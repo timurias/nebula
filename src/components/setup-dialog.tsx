@@ -50,15 +50,15 @@ export default function SetupDialog({ onStartGame }: SetupDialogProps) {
             >
               <div className="flex items-center space-x-2">
                 <RadioGroupItem value="5" id="b5" />
-                <Label htmlFor="b5">5x5 (20 Pts)</Label>
+                <Label htmlFor="b5">5x5 (30 Pts)</Label>
               </div>
               <div className="flex items-center space-x-2">
                 <RadioGroupItem value="10" id="b10" />
-                <Label htmlFor="b10">10x10 (50 Pts)</Label>
+                <Label htmlFor="b10">10x10 (70 Pts)</Label>
               </div>
               <div className="flex items-center space-x-2">
                 <RadioGroupItem value="15" id="b15" />
-                <Label htmlFor="b15">15x15 (100 Pts)</Label>
+                <Label htmlFor="b15">15x15 (150 Pts)</Label>
               </div>
             </RadioGroup>
           </div>

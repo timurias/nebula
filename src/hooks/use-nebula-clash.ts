@@ -24,10 +24,10 @@ import { evaluateMove } from "@/ai/flows/ai-opponent-move-evaluation";
 
 const getPointsForBoardSize = (boardSize: BoardSize): number => {
     switch (boardSize) {
-        case 5: return 20;
-        case 10: return 50;
-        case 15: return 100;
-        default: return 50;
+        case 5: return 30;
+        case 10: return 70;
+        case 15: return 150;
+        default: return 70;
     }
 }
 
@@ -307,9 +307,9 @@ export const useNebulaClash = () => {
   }
   
   const handleAttack = useCallback((attacker: Player, targetCell: {row: number, col: number}) => {
-    let toastInfo: { title: string; description?: string; variant?: "destructive" } | null = null;
     let isValidAttack = false;
-
+    let toastInfo: { title: string; description?: string; variant?: "destructive" } | null = null;
+    
     setGameState(prev => {
       const isHumanAttack = attacker === 'human';
       const targetPlayerKey = isHumanAttack ? 'ai' : 'player';
@@ -441,7 +441,7 @@ export const useNebulaClash = () => {
       return updatedState;
     });
 
-    if (!isValidAttack && toastInfo) {
+    if (toastInfo) {
       toast(toastInfo);
     }
   }, [toast, checkWinner]);
@@ -528,24 +528,21 @@ export const useNebulaClash = () => {
         return;
     }
 
-    setGameState(prev => {
-        const newPlayerState = {...prev.player, identifiedShips: playerShips};
-        const newAiState = placeAllShipsRandomly(prev.ai, prev.settings.boardSize);
-        
-        toast({ title: "Fleet Deployed!", description: "Your ships are in position. Time to attack." });
-
-        return {
-            ...prev,
-            phase: "playing",
-            placingShips: false,
-            ai: newAiState,
-            player: newPlayerState,
-            message: "All ships placed! Your turn to attack.",
-            selectedCellType: null,
-            turn: 'human',
-        };
-    });
-  }, [gameState.player.board, gameState.ai, gameState.settings.boardSize, placeAllShipsRandomly, toast]);
+    const newPlayerState = {...gameState.player, identifiedShips: playerShips};
+    const newAiState = placeAllShipsRandomly(gameState.ai, gameState.settings.boardSize);
+    
+    setGameState(prev => ({
+        ...prev,
+        phase: "playing",
+        placingShips: false,
+        ai: newAiState,
+        player: newPlayerState,
+        message: "All ships placed! Your turn to attack.",
+        selectedCellType: null,
+        turn: 'human',
+    }));
+    toast({ title: "Fleet Deployed!", description: "Your ships are in position. Time to attack." });
+  }, [gameState.player, gameState.ai, gameState.settings.boardSize, placeAllShipsRandomly, toast]);
   
   const placeShipsRandomly = useCallback(() => {
     setIsPlacingRandomly(true);
@@ -561,9 +558,9 @@ export const useNebulaClash = () => {
   }, [placeAllShipsRandomly, finishPlacing]);
   
   const handleCellClick = (row: number, col: number, boardOwner: Player) => {
-    const { phase, turn, placingShips, selectedWeaponId, allocationMode, selectedResource, player } = gameState;
     let toastInfo: { title: string; description?: string; variant?: "destructive" } | null = null;
-
+    const { phase, turn, placingShips, selectedWeaponId, allocationMode, selectedResource, player } = gameState;
+    
     if (placingShips) {
       if (boardOwner === 'player') placeShipCell(row, col);
       return;
@@ -581,36 +578,42 @@ export const useNebulaClash = () => {
     } else if (boardOwner === 'player') {
       const clickedCell = player.board[row][col];
       if (!clickedCell.ship) {
-        // If clicking an empty cell, cancel allocation mode
         if(allocationMode) {
           setGameState(prev => ({...prev, allocationMode: null, selectedResource: null}));
         }
         return;
       }
 
-
       if (allocationMode && selectedResource) {
         const sourceCellState = player.board[selectedResource.row][selectedResource.col];
         const targetCellState = player.board[row][col];
+
         if(!sourceCellState.ship || !targetCellState.ship || sourceCellState.ship.shipId !== targetCellState.ship.shipId){
           toastInfo = { title: "Invalid Target", description: "Can only power or charge components on the same ship.", variant: "destructive"};
         } else {
+            let allocationSuccessful = false;
+            let localToast: { title: string; description?: string; variant?: "destructive" } | null = null;
+            
             setGameState(prev => {
                 const newBoard = JSON.parse(JSON.stringify(prev.player.board));
                 const sourceCellState = newBoard[selectedResource.row][selectedResource.col];
                 const targetCellState = newBoard[row][col];
-                let allocationSuccessful = false;
-                let localToast: { title: string; description?: string; variant?: "destructive" } | null = null;
-
 
                 if (allocationMode === 'energy') {
                     if (targetCellState.ship && targetCellState.ship.type !== CellType.Simple && targetCellState.ship.type !== CellType.Energy) {
                         // De-energize previously powered cell if any
-                        const oldTargetId = sourceCellState.ship.powering;
-                        if(oldTargetId) {
-                           const oldTargetCellData = findCellByShipId(newBoard, oldTargetId);
-                           if(oldTargetCellData?.state.ship) oldTargetCellData.state.ship.powering = null;
+                        for(const bRow of newBoard) {
+                            for(const bCell of bRow) {
+                                if(bCell.ship?.powering === sourceCellState.ship.id) {
+                                    bCell.ship.powering = null;
+                                }
+                            }
                         }
+
+                        // Unpower all components that were powered by this source
+                        const poweredComponents = newBoard.flat().filter((c: CellState) => c.ship?.powering === sourceCellState.ship.id);
+                        poweredComponents.forEach((c: CellState) => c.ship!.powering = null);
+                        
                         sourceCellState.ship.powering = targetCellState.ship.id;
                         localToast = { title: "Component Energized", description: `${targetCellState.ship.type} is now powered.` };
                         allocationSuccessful = true;
@@ -621,7 +624,7 @@ export const useNebulaClash = () => {
                         const currentCharge = targetCellState.ship.ammoCharge || 0;
                         const poweredBy = getPoweredComponentEnergySources(newBoard, sourceCellState.ship.id);
 
-                        if (poweredBy.length === 0) {
+                        if (poweredBy.length < 1) {
                            localToast = { title: "Ammo bay not energized", variant: "destructive" };
                         } else if (currentCharge < weaponSpec.ammoCost) {
                             targetCellState.ship.ammoCharge = currentCharge + 1;
@@ -660,7 +663,7 @@ export const useNebulaClash = () => {
           case CellType.Ammo:
             if (clickedCell.ship.usedThisTurn) {
               toastInfo = { title: "Ammo Used", description: "This ammo cell has already been used this turn." };
-            } else if (getPoweredComponentEnergySources(player.board, clickedCell.ship.id).length === 0) {
+            } else if (getPoweredComponentEnergySources(player.board, clickedCell.ship.id).length < 1) {
               toastInfo = { title: "Not Energized", description: "This ammo producer has no power.", variant: "destructive" };
             } else {
               toastInfo = { title: "Ammo Allocation", description: "Select a weapon to charge." };
