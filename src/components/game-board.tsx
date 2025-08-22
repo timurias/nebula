@@ -100,15 +100,18 @@ export default function GameBoard({ board, ships, onCellClick, isPlayerBoard, de
       >
         {board.map((row, rowIndex) =>
           row.map((cell, colIndex) => {
-            if (!cell || !cell.ship) return null;
             const Icon = cell.ship ? cellTypeIcons[cell.ship.type] : null;
-            const borderClasses = (isPlayerBoard || debug) ? getBorderClasses(rowIndex, colIndex, ships) : "";
+            const borderClasses = (isPlayerBoard || debug) && cell.ship ? getBorderClasses(rowIndex, colIndex, ships) : "";
             const isSelectedWeapon = isPlayerBoard && selectedWeaponId === cell.ship?.id;
             const isSelectedResource = isPlayerBoard && selectedResource?.row === rowIndex && selectedResource?.col === colIndex;
             
-            const energySources = getPoweredComponentEnergySourcesCount(board, cell.ship.id);
+            let energySources = 0;
+            if(cell.ship) {
+                energySources = getPoweredComponentEnergySourcesCount(board, cell.ship.id);
+            }
+
             let isEnergized = false;
-            if(isResourceConsumer(cell.ship.type)) {
+            if(cell.ship && isResourceConsumer(cell.ship.type)) {
                 if(WEAPON_TYPES.includes(cell.ship.type)) {
                     const spec = WEAPON_SPECS[cell.ship.type];
                     isEnergized = energySources >= spec.energyCost;
@@ -240,5 +243,3 @@ export default function GameBoard({ board, ships, onCellClick, isPlayerBoard, de
     </TooltipProvider>
   );
 }
-
-    
