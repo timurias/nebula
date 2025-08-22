@@ -67,7 +67,9 @@ export default function Home() {
                 <span className="text-xl font-bold">{gameState.player.totalAmmo}</span>
             </div>
           {gameState.player.identifiedShips.flatMap(ship => ship.weapons).map(weapon => {
+            if (!weapon) return null;
             const spec = WEAPON_SPECS[weapon.type as keyof typeof WEAPON_SPECS];
+            if (!spec) return null;
             const charge = weapon.ammoCharge || 0;
             const isReady = charge >= spec.ammoCost;
             return (
