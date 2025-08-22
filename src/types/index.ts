@@ -36,6 +36,7 @@ export interface ShipCell {
   shipId?: number;
   ammoCharge?: number;
   isEnergized?: boolean;
+  usedThisTurn?: boolean;
 }
 
 export type CellState = {
@@ -116,4 +117,6 @@ export interface GameState {
   // State for targeting and resource allocation
   selectedWeaponId: string | null;
   targetedCell: {row: number, col: number} | null;
+  allocationMode: 'energy' | 'ammo' | null;
+  selectedResource: {row: number, col: number} | null;
 }

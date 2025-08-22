@@ -60,6 +60,8 @@ const getInitialState = (): GameState => {
     debug: false,
     selectedWeaponId: null,
     targetedCell: null,
+    allocationMode: null,
+    selectedResource: null,
   }
 };
 
@@ -139,23 +141,6 @@ const identifyShips = (board: Board): IdentifiedShip[] => {
                                 }
                         }
                     }
-
-                    const neighbors = [
-                        { row: current.row - 1, col: current.col }, { row: current.row + 1, col: current.col },
-                        { row: current.row, col: current.col - 1 }, { row: current.row, col: current.col + 1 }
-                    ];
-
-                    for (const neighbor of neighbors) {
-                        if (
-                            neighbor.row >= 0 && neighbor.row < size &&
-                            neighbor.col >= 0 && neighbor.col < size &&
-                            board[neighbor.row][neighbor.col].ship &&
-                            !visited[neighbor.row][neighbor.col]
-                        ) {
-                            visited[neighbor.row][neighbor.col] = true;
-                            queue.push(neighbor);
-                        }
-                    }
                 }
                 newShip.isSunk = newShip.cells.every(({row, col}) => board[row][col].isHit);
                 ships.push(newShip);
@@ -185,11 +170,13 @@ export const useNebulaClash = () => {
   
   const endTurn = useCallback(() => {
     setGameState(prev => {
-        const activePlayerKey = prev.turn;
-        const playerState = activePlayerKey === 'human' ? prev.player : prev.ai;
+        if(prev.turn !== 'human') return prev;
+
+        const activePlayerKey = 'player';
+        const playerState = prev[activePlayerKey];
         let newBoard = JSON.parse(JSON.stringify(playerState.board));
         
-        // 1. Decrement existing repair timers
+        // 1. Decrement existing repair timers for the active player
         for (let r = 0; r < newBoard.length; r++) {
             for (let c = 0; c < newBoard[r].length; c++) {
                 const cell = newBoard[r][c];
@@ -204,33 +191,10 @@ export const useNebulaClash = () => {
         
         let newShips = identifyShips(newBoard);
 
-        // 2. Resource Production & Repair Assignment
+        // 2. Repair Assignment
         newShips.forEach(ship => {
             if (ship.isSunk) return;
 
-            // Energize components
-            let availableEnergy = ship.energyProducers.length;
-            ship.energyConsumers.forEach(consumer => {
-              const cell = findCellByShipId(newBoard, consumer.id);
-              if(cell?.ship) {
-                  if(availableEnergy > 0) {
-                    cell.ship.isEnergized = true;
-                    availableEnergy--;
-                  } else {
-                    cell.ship.isEnergized = false;
-                  }
-              }
-            });
-
-            // Ammo Production
-            ship.ammoProducers.forEach(ammo => {
-              const cell = findCellByShipId(newBoard, ammo.id);
-              if(cell?.ship?.isEnergized) {
-                playerState.totalAmmo += 1;
-              }
-            });
-
-            // Repair Assignment
             let availableRepairs = ship.medicalBays.filter(m => {
                 const cell = findCellByShipId(newBoard, m.id);
                 return cell?.ship?.isEnergized;
@@ -249,20 +213,18 @@ export const useNebulaClash = () => {
                 availableRepairs--;
             }
         });
-
+        
         newShips = identifyShips(newBoard);
-
+        
         const updatedPlayerState: PlayerState = {
             ...playerState,
             board: newBoard,
             identifiedShips: newShips,
         };
 
-        const newPlayerState = activePlayerKey === 'human' ? updatedPlayerState : prev.player;
-        const newAiState = activePlayerKey === 'ai' ? updatedPlayerState : prev.ai;
+        const newPlayerState = updatedPlayerState;
+        const newAiState = prev.ai;
 
-        const nextTurn = prev.turn === 'human' ? 'ai' : 'human';
-        
         const winner = checkWinner(newPlayerState, newAiState);
         if (winner) {
           return {
@@ -272,16 +234,17 @@ export const useNebulaClash = () => {
             message: winner === 'human' ? 'You have conquered the nebula.' : 'Your fleet has been destroyed.'
           }
         }
-
+        
         return {
             ...prev,
-            turn: nextTurn,
+            turn: 'ai',
             turnNumber: prev.turnNumber + 1,
-            message: nextTurn === 'human' ? "Your turn." : "Enemy's turn.",
+            message: "Enemy's turn.",
             player: newPlayerState,
-            ai: newAiState,
             selectedWeaponId: null,
             targetedCell: null,
+            allocationMode: null,
+            selectedResource: null,
         }
     });
   }, [checkWinner]);
@@ -315,7 +278,11 @@ export const useNebulaClash = () => {
       const weaponCell = findCellByShipId(attackerState.board, weaponId!);
       
       if(!weaponCell || !weaponCell.ship || !WEAPON_TYPES.includes(weaponCell.ship.type)) {
-          // This should not happen with proper UI
+          return prev;
+      }
+
+      if(!weaponCell.ship.isEnergized){
+          toast({title: "Weapon Not Energized", description: "This weapon has no power.", variant: "destructive"});
           return prev;
       }
 
@@ -361,7 +328,7 @@ export const useNebulaClash = () => {
 
       let updatedState: GameState = { ...prev };
       updatedState[targetPlayerKey] = { ...targetState, board: newBoard };
-      updatedState[isHumanAttack ? 'player' : 'ai'] = { ...attackerState, board: newAttackerBoard };
+      updatedState[isHumanAttack ? 'player' : 'ai'] = { ...attackerState, board: newAttackerBoard, identifiedShips: identifyShips(newAttackerBoard) };
 
       setTimeout(() => {
         setGameState(current => {
@@ -402,12 +369,9 @@ export const useNebulaClash = () => {
             };
           }
           
-          // If all attacks are done, end turn
-          if (isHumanAttack || (!isHumanAttack && current.ai.identifiedShips.every(s => s.weapons.every(w => (w.ammoCharge || 0) < WEAPON_SPECS[w.type as keyof typeof WEAPON_SPECS].ammoCost)))) {
-             const turnEndTimeout = setTimeout(() => {
-                endTurn();
-              }, 1000);
-              // We don't need to clear this timeout as it's a one-off
+          // AI turn logic is now handled in useEffect, so we don't call endTurn here for AI.
+          if(isHumanAttack) {
+            // Human attack does not automatically end turn anymore
           }
 
 
@@ -422,11 +386,9 @@ export const useNebulaClash = () => {
   
       return updatedState;
     });
-  }, [toast, endTurn, checkWinner]);
+  }, [toast, checkWinner]);
 
   const getSmartMove = useCallback(async (board: Board, size: number, aiMemory: GameState['aiMemory'], difficulty: Difficulty, turnNumber: number) => {
-    // This function needs to be heavily updated for new mechanics
-    // For now, it will just pick a random valid cell
     const allPossible: { row: number; col: number }[] = [];
     for (let r = 0; r < size; r++) {
       for (let c = 0; c < size; c++) {
@@ -468,7 +430,7 @@ export const useNebulaClash = () => {
         points: getPointsForBoardSize(boardSize),
     };
     
-    // Simplified random placement for new mechanics
+    // This function can be improved to build more coherent ships
     let attempts = 0;
     while(newState.points > 0 && attempts < 100) {
       attempts++;
@@ -530,31 +492,108 @@ export const useNebulaClash = () => {
   }, [placeAllShipsRandomly, finishPlacing]);
   
   const handleCellClick = useCallback((row: number, col: number, boardOwner: Player) => {
-    const { phase, turn, placingShips, selectedWeaponId } = gameState;
+    setGameState(prev => {
+      const { phase, turn, placingShips, selectedWeaponId, allocationMode, selectedResource } = prev;
 
-    if (placingShips) {
-      if (boardOwner === 'player') {
-        placeShipCell(row, col);
-      }
-    } else if (phase === 'playing' && turn === 'human' && boardOwner === 'ai') {
-        if(selectedWeaponId) {
-            setGameState(prev => ({...prev, targetedCell: {row, col}}));
-            handleAttack('human', {row, col});
-        } else {
-            toast({ title: "No Weapon Selected", description: "Click on one of your active weapons first.", variant: "destructive" });
+      // 1. Ship Placement Phase
+      if (placingShips) {
+        if (boardOwner === 'player') {
+          placeShipCell(row, col);
         }
-    } else if (phase === 'playing' && turn === 'human' && boardOwner === 'player') {
-        const cell = gameState.player.board[row][col];
-        if (cell.ship && WEAPON_TYPES.includes(cell.ship.type)) {
-            const weaponSpec = WEAPON_SPECS[cell.ship.type as keyof typeof WEAPON_SPECS];
-            if ((cell.ship.ammoCharge || 0) >= weaponSpec.ammoCost) {
-                setGameState(prev => ({ ...prev, selectedWeaponId: cell.ship!.id }));
-            } else {
-                toast({title: "Weapon Not Ready", description: "This weapon is not fully charged."});
+        return prev;
+      }
+      
+      // 2. Playing Phase
+      if (phase !== 'playing' || turn !== 'human') return prev;
+
+      // 2a. Player clicks on Enemy board (Attack)
+      if (boardOwner === 'ai') {
+        if (selectedWeaponId) {
+          handleAttack('human', {row, col});
+          return { ...prev, targetedCell: {row, col} };
+        } else {
+          toast({ title: "No Weapon Selected", description: "Select one of your ready weapons first.", variant: "destructive" });
+        }
+        return prev;
+      }
+
+      // 2b. Player clicks on their own board
+      if (boardOwner === 'player') {
+        const clickedCell = prev.player.board[row][col];
+        if (!clickedCell.ship) return prev;
+
+        // If in allocation mode, try to allocate resource
+        if (allocationMode && selectedResource) {
+          const sourceCell = prev.player.board[selectedResource.row][selectedResource.col];
+          const targetCell = clickedCell;
+
+          if (allocationMode === 'energy') {
+            if (targetCell.ship && targetCell.ship.type !== CellType.Simple && targetCell.ship.type !== CellType.Energy && !targetCell.ship.isEnergized) {
+              const newBoard = JSON.parse(JSON.stringify(prev.player.board));
+              newBoard[row][col].ship.isEnergized = true;
+              newBoard[selectedResource.row][selectedResource.col].ship.usedThisTurn = true;
+              toast({ title: "Component Energized", description: `${targetCell.ship.type} is now powered.` });
+              return { ...prev, player: { ...prev.player, board: newBoard }, allocationMode: null, selectedResource: null };
+            }
+          } else if (allocationMode === 'ammo') {
+            if (targetCell.ship && WEAPON_TYPES.includes(targetCell.ship.type)) {
+              const newBoard = JSON.parse(JSON.stringify(prev.player.board));
+              const weaponSpec = WEAPON_SPECS[targetCell.ship.type];
+              const currentCharge = newBoard[row][col].ship.ammoCharge || 0;
+              if (currentCharge < weaponSpec.ammoCost) {
+                newBoard[row][col].ship.ammoCharge = currentCharge + 1;
+                newBoard[selectedResource.row][selectedResource.col].ship.usedThisTurn = true;
+                toast({ title: "Weapon Charged", description: `Charged ${targetCell.ship.type} by 1.` });
+                return { ...prev, player: { ...prev.player, board: newBoard }, allocationMode: null, selectedResource: null };
+              } else {
+                 toast({ title: "Weapon Fully Charged", variant: "destructive" });
+              }
+            }
+          }
+          return prev;
+        }
+
+        // If not in allocation mode, determine action based on clicked cell
+        switch (clickedCell.ship.type) {
+          case CellType.Energy:
+            if (clickedCell.ship.usedThisTurn) {
+              toast({ title: "Energy Used", description: "This energy cell has already been used this turn." });
+              return prev;
+            }
+            toast({ title: "Energy Allocation", description: "Select a component to power." });
+            return { ...prev, allocationMode: 'energy', selectedResource: { row, col } };
+          
+          case CellType.Ammo:
+            if (clickedCell.ship.usedThisTurn) {
+              toast({ title: "Ammo Used", description: "This ammo cell has already been used this turn." });
+              return prev;
+            }
+            if (!clickedCell.ship.isEnergized) {
+              toast({ title: "Not Energized", description: "This ammo producer has no power.", variant: "destructive" });
+              return prev;
+            }
+            toast({ title: "Ammo Allocation", description: "Select a weapon to charge." });
+            return { ...prev, allocationMode: 'ammo', selectedResource: { row, col } };
+
+          default:
+            if (WEAPON_TYPES.includes(clickedCell.ship.type)) {
+              const weaponSpec = WEAPON_SPECS[clickedCell.ship.type];
+              if (!clickedCell.ship.isEnergized) {
+                toast({ title: "Weapon Not Energized", description: "This weapon has no power.", variant: "destructive" });
+                return prev;
+              }
+              if ((clickedCell.ship.ammoCharge || 0) >= weaponSpec.ammoCost) {
+                toast({ title: "Weapon Selected", description: "Target an enemy cell to fire." });
+                return { ...prev, selectedWeaponId: clickedCell.ship.id, allocationMode: null, selectedResource: null };
+              } else {
+                toast({ title: "Weapon Not Ready", description: "This weapon is not fully charged." });
+              }
             }
         }
-    }
-  }, [gameState, placeShipCell, handleAttack, toast]);
+      }
+      return prev;
+    });
+  }, [placeShipCell, handleAttack, toast]);
 
   const chargeWeapon = useCallback((weaponId: string, amount: number) => {
     setGameState(prev => {
@@ -583,6 +622,14 @@ export const useNebulaClash = () => {
         return prev;
     })
   }, [toast]);
+  
+  const cancelAllocation = useCallback(() => {
+    setGameState(prev => ({
+      ...prev,
+      allocationMode: null,
+      selectedResource: null,
+    }));
+  }, []);
 
   const resetGame = useCallback(() => {
     localStorage.removeItem("nebulaClashState");
@@ -638,6 +685,24 @@ export const useNebulaClash = () => {
     setGameState(prev => ({ ...prev, debug: !prev.debug }));
   }, []);
 
+  // Reset usedThisTurn at the start of the player's turn
+  useEffect(() => {
+    if (gameState.turn === 'human' && gameState.turnNumber > 0) {
+      setGameState(prev => {
+        const newBoard = JSON.parse(JSON.stringify(prev.player.board));
+        for(const row of newBoard) {
+          for(const cell of row) {
+            if(cell.ship && (cell.ship.type === CellType.Energy || cell.ship.type === CellType.Ammo)) {
+              cell.ship.usedThisTurn = false;
+            }
+          }
+        }
+        return { ...prev, player: {...prev.player, board: newBoard }};
+      })
+    }
+  }, [gameState.turn, gameState.turnNumber]);
+
+
   useEffect(() => {
     try {
       const savedState = localStorage.getItem("nebulaClashState");
@@ -665,79 +730,135 @@ export const useNebulaClash = () => {
     }
   }, [gameState]);
   
-  useEffect(() => {
-    const performAITurn = async () => {
-        if (gameState.phase !== 'playing' || gameState.turn !== 'ai' || gameState.winner) {
-            return;
-        }
+  const executeAITurn = useCallback(async () => {
+    // AI turn logic
+    let aiState = gameState.ai;
+    let newBoard = JSON.parse(JSON.stringify(aiState.board));
 
-        // AI logic for resource management
-        setGameState(prev => {
-            let newBoard = JSON.parse(JSON.stringify(prev.ai.board));
-            let newShips = identifyShips(newBoard);
-            let totalAmmo = prev.ai.totalAmmo;
-
-            newShips.forEach(ship => {
-                if(ship.isSunk) return;
-
-                let availableEnergy = ship.energyProducers.length;
-                ship.energyConsumers.forEach(c => {
-                    const cell = findCellByShipId(newBoard, c.id);
-                    if(cell?.ship) cell.ship.isEnergized = availableEnergy-- > 0;
-                });
-
-                ship.ammoProducers.forEach(p => {
-                    const cell = findCellByShipId(newBoard, p.id);
-                    if(cell?.ship?.isEnergized) totalAmmo++;
-                });
-
-                ship.weapons.forEach(w => {
-                    const cell = findCellByShipId(newBoard, w.id);
-                    if(cell?.ship?.isEnergized) {
-                        const spec = WEAPON_SPECS[w.type as keyof typeof WEAPON_SPECS];
-                        const needed = spec.ammoCost - (cell.ship.ammoCharge || 0);
-                        const chargeAmount = Math.min(totalAmmo, needed);
-                        if(cell.ship.ammoCharge) {
-                            cell.ship.ammoCharge += chargeAmount;
-                        } else {
-                            cell.ship.ammoCharge = chargeAmount;
-                        }
-                        totalAmmo -= chargeAmount;
-                    }
-                });
-            });
-            
-            return {...prev, ai: {...prev.ai, board: newBoard, totalAmmo, identifiedShips: newShips}};
-        });
-
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        
-        // AI attack logic
-        const readyWeapons = gameState.ai.identifiedShips
-            .flatMap(s => s.weapons)
-            .filter(w => {
-                const spec = WEAPON_SPECS[w.type as keyof typeof WEAPON_SPECS];
-                return (w.ammoCharge || 0) >= spec.ammoCost;
-            });
-
-        if (readyWeapons.length > 0) {
-            const weaponToFire = readyWeapons[0];
-            const { move } = await getSmartMove(gameState.player.board, gameState.settings.boardSize, gameState.aiMemory, gameState.settings.difficulty, gameState.turnNumber);
-            if(move){
-                setGameState(prev => ({...prev, selectedWeaponId: weaponToFire.id}));
-                handleAttack('ai', move);
-            } else {
-                endTurn();
+    // 1. AI Resource Management (Simplified)
+    // Energize
+    const energyProducers = newBoard.flat().filter((c: CellState) => c.ship?.type === CellType.Energy);
+    let availableEnergy = energyProducers.length;
+    for(const row of newBoard) {
+        for(const cell of row) {
+            if(cell.ship && cell.ship.type !== CellType.Energy && cell.ship.type !== CellType.Simple) {
+                if(availableEnergy > 0) {
+                    cell.ship.isEnergized = true;
+                    availableEnergy--;
+                } else {
+                    cell.ship.isEnergized = false;
+                }
             }
-        } else {
-            endTurn();
         }
-    };
+    }
 
-    performAITurn();
+    // Charge weapons
+    const ammoProducers = newBoard.flat().filter((c: CellState) => c.ship?.type === CellType.Ammo && c.ship.isEnergized);
+    let availableAmmo = ammoProducers.length;
+    for(const row of newBoard) {
+        for(const cell of row) {
+            if(cell.ship && WEAPON_TYPES.includes(cell.ship.type) && cell.ship.isEnergized) {
+                const spec = WEAPON_SPECS[cell.ship.type];
+                const needed = spec.ammoCost - (cell.ship.ammoCharge || 0);
+                const chargeAmount = Math.min(availableAmmo, needed);
+                cell.ship.ammoCharge = (cell.ship.ammoCharge || 0) + chargeAmount;
+                availableAmmo -= chargeAmount;
+            }
+        }
+    }
+    
+    // Update AI state with new board
+    setGameState(prev => ({...prev, ai: {...prev.ai, board: newBoard, identifiedShips: identifyShips(newBoard)}}));
+    
+    await new Promise(resolve => setTimeout(resolve, 500)); // Pause for resource allocation visualization
+
+    // 2. AI Attack
+    const readyWeapons = newBoard.flat()
+        .filter((c: CellState) => c.ship && WEAPON_TYPES.includes(c.ship.type) && c.ship.isEnergized && (c.ship.ammoCharge || 0) >= WEAPON_SPECS[c.ship.type].ammoCost)
+        .map((c: CellState) => c.ship!);
+        
+    for (const weapon of readyWeapons) {
+      const { move } = await getSmartMove(gameState.player.board, gameState.settings.boardSize, gameState.aiMemory, gameState.settings.difficulty, gameState.turnNumber);
+      if(move){
+          await new Promise<void>(resolve => {
+              setGameState(prev => {
+                  const newState = {...prev, selectedWeaponId: weapon.id};
+                  handleAttack('ai', move);
+                  return newState;
+              });
+              // Wait for attack animation to finish
+              setTimeout(() => resolve(), 1000);
+          });
+      }
+    }
+    
+    // 3. End AI Turn
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    setGameState(prev => {
+      // Logic from endTurn for AI
+      let newAIBoard = JSON.parse(JSON.stringify(prev.ai.board));
+      let newAIShips = identifyShips(newAIBoard);
+
+      newAIShips.forEach(ship => {
+          if (ship.isSunk) return;
+          let availableRepairs = ship.medicalBays.filter(m => {
+              const cell = findCellByShipId(newAIBoard, m.id);
+              return cell?.ship?.isEnergized;
+          }).length;
+          const cellsCurrentlyRepairing = ship.cells.filter(c => newAIBoard[c.row][c.col].repairTurnsLeft).length;
+          availableRepairs -= cellsCurrentlyRepairing;
+          const damagedCells = ship.cells.map(c => ({ ...c, cell: newAIBoard[c.row][c.col] })).filter(c => c.cell.isHit && !c.cell.repairTurnsLeft);
+          for (const cellToRepair of damagedCells) {
+              if (availableRepairs <= 0) break;
+              newAIBoard[cellToRepair.row][cellToRepair.col].repairTurnsLeft = 3;
+              availableRepairs--;
+          }
+      });
+      for(const row of newAIBoard) {
+          for(const cell of row) {
+              if(cell.ship && (cell.ship.type === CellType.Energy || cell.ship.type === CellType.Ammo)) {
+                cell.ship.usedThisTurn = false;
+              }
+              if (cell.repairTurnsLeft && cell.repairTurnsLeft > 0) {
+                    cell.repairTurnsLeft--;
+                    if (cell.repairTurnsLeft === 0) {
+                        cell.isHit = false;
+                    }
+                }
+          }
+      }
+
+      const updatedAIState = {...prev.ai, board: newAIBoard, identifiedShips: identifyShips(newAIBoard)};
+      const winner = checkWinner(prev.player, updatedAIState);
+       if (winner) {
+          return {
+            ...prev,
+            phase: 'over',
+            winner,
+            message: winner === 'human' ? 'You have conquered the nebula.' : 'Your fleet has been destroyed.'
+          }
+        }
+
+      return {
+        ...prev,
+        ai: updatedAIState,
+        turn: 'human',
+        message: 'Your turn.',
+      }
+    });
+
+  }, [gameState, getSmartMove, handleAttack, checkWinner]);
+
+  useEffect(() => {
+    if (gameState.phase === 'playing' && gameState.turn === 'ai' && !gameState.winner) {
+      const turnTimeout = setTimeout(() => {
+        executeAITurn();
+      }, 1000);
+      return () => clearTimeout(turnTimeout);
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gameState.turn, gameState.phase, gameState.winner, gameState.turnNumber]);
+  }, [gameState.turn, gameState.phase, gameState.winner]);
 
 
-  return { gameState, startGame, selectCellType, handleCellClick, resetGame, placeShipsRandomly, isPlacingRandomly, finishPlacing, toggleDebugMode, chargeWeapon, endTurn };
+  return { gameState, startGame, selectCellType, handleCellClick, resetGame, placeShipsRandomly, isPlacingRandomly, finishPlacing, toggleDebugMode, chargeWeapon, endTurn, cancelAllocation };
 };

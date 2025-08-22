@@ -7,10 +7,10 @@ import SetupDialog from "@/components/setup-dialog";
 import ShipPlacementPanel from "@/components/ship-placement-panel";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Rocket, Dices, RotateCcw, CheckSquare, Target, Bug, Zap, Bomb } from "lucide-react";
+import { Rocket, Dices, RotateCcw, CheckSquare, Target, Bug, Zap, Bomb, Power, Fuel } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { CellType, WEAPON_SPECS, WEAPON_TYPES } from "@/types";
+import { CellType, WEAPON_SPECS } from "@/types";
 
 export default function Home() {
   const {
@@ -24,7 +24,8 @@ export default function Home() {
     finishPlacing,
     toggleDebugMode,
     chargeWeapon,
-    endTurn
+    endTurn,
+    cancelAllocation,
   } = useNebulaClash();
 
   if (gameState.phase === "setup") {
@@ -55,47 +56,62 @@ export default function Home() {
        )
     }
 
+    const availableEnergy = gameState.player.identifiedShips.flatMap(s => s.cells).filter(c => gameState.player.board[c.row][c.col].ship?.type === CellType.Energy && !gameState.player.board[c.row][c.col].ship?.usedThisTurn).length;
+    const availableAmmo = gameState.player.identifiedShips.flatMap(s => s.cells).filter(c => gameState.player.board[c.row][c.col].ship?.type === CellType.Ammo && !gameState.player.board[c.row][c.col].ship?.usedThisTurn && gameState.player.board[c.row][c.col].ship?.isEnergized).length;
+
+
     return (
       <div className="flex flex-col gap-4">
         <div>
-          <h3 className="font-headline text-lg mb-2">Weapons Control</h3>
+          <h3 className="font-headline text-lg mb-2">Weapons & Resources</h3>
            <div className="flex justify-between items-center bg-secondary p-2 rounded-md mb-2">
                 <div className="flex items-center gap-2">
-                    <Bomb className="w-5 h-5 text-accent"/>
-                    <span className="font-semibold">Ammo</span>
+                    <Power className="w-5 h-5 text-yellow-400"/>
+                    <span className="font-semibold">Available Energy</span>
                 </div>
-                <span className="text-xl font-bold">{gameState.player.totalAmmo}</span>
+                <span className="text-xl font-bold">{availableEnergy}</span>
             </div>
+            <div className="flex justify-between items-center bg-secondary p-2 rounded-md mb-2">
+                <div className="flex items-center gap-2">
+                    <Fuel className="w-5 h-5 text-orange-400"/>
+                    <span className="font-semibold">Available Ammo</span>
+                </div>
+                <span className="text-xl font-bold">{availableAmmo}</span>
+            </div>
+
+            {gameState.allocationMode && (
+              <Card className="p-3 mb-2 border-accent">
+                <div className="flex flex-col items-center">
+                  <p className="font-semibold text-accent mb-2">
+                    Allocating {gameState.allocationMode.charAt(0).toUpperCase() + gameState.allocationMode.slice(1)}
+                  </p>
+                  <p className="text-sm text-muted-foreground text-center mb-2">
+                    Select a target component to energize or charge.
+                  </p>
+                  <Button size="sm" variant="outline" onClick={cancelAllocation}>Cancel</Button>
+                </div>
+              </Card>
+            )}
+
           {gameState.player.identifiedShips.flatMap(ship => ship.weapons).map(weapon => {
             if (!weapon) return null;
             const spec = WEAPON_SPECS[weapon.type as keyof typeof WEAPON_SPECS];
             if (!spec) return null;
             const charge = weapon.ammoCharge || 0;
             const isReady = charge >= spec.ammoCost;
+            const isEnergized = weapon.isEnergized;
             return (
-              <Card key={weapon.id} className={`p-3 mb-2 ${gameState.selectedWeaponId === weapon.id ? 'border-accent' : ''}`}>
+              <Card key={weapon.id} className={`p-3 mb-2 ${gameState.selectedWeaponId === weapon.id ? 'border-accent' : ''} ${!isEnergized ? 'opacity-50' : ''}`}>
                  <div className="flex justify-between items-center">
                    <p className="font-semibold">Weapon {weapon.type.replace('weapon', '')}</p>
-                   <Badge variant={isReady ? 'default' : 'secondary'}>{isReady ? 'Ready' : 'Charging'}</Badge>
+                   <div className="flex items-center gap-2">
+                    {!isEnergized && <Zap className="w-4 h-4 text-yellow-500" />}
+                    <Badge variant={isReady ? 'default' : 'secondary'}>{isReady ? 'Ready' : 'Charging'}</Badge>
+                   </div>
                  </div>
                  <Progress value={(charge / spec.ammoCost) * 100} className="my-2" />
                  <p className="text-sm text-muted-foreground text-center mb-2">Charge: {charge} / {spec.ammoCost}</p>
-                 <div className="flex gap-2">
-                    <Button 
-                        size="sm" 
-                        variant="outline"
-                        className="flex-1"
-                        onClick={() => chargeWeapon(weapon.id, 1)}
-                        disabled={gameState.player.totalAmmo < 1 || charge >= spec.ammoCost}
-                    >+1 Ammo</Button>
-                     <Button 
-                        size="sm" 
-                        variant="outline"
-                        className="flex-1"
-                        onClick={() => chargeWeapon(weapon.id, 5)}
-                        disabled={gameState.player.totalAmmo < 5 || charge >= spec.ammoCost}
-                    >+5 Ammo</Button>
-                 </div>
+                 
               </Card>
             )
           })}
@@ -135,6 +151,8 @@ export default function Home() {
                 onCellClick={(row, col) => handleCellClick(row, col, 'player')}
                 isPlayerBoard={true}
                 selectedWeaponId={gameState.selectedWeaponId}
+                allocationMode={gameState.allocationMode}
+                selectedResource={gameState.selectedResource}
               />
             </CardContent>
           </Card>
