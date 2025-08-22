@@ -7,7 +7,8 @@ import SetupDialog from "@/components/setup-dialog";
 import ShipPlacementPanel from "@/components/ship-placement-panel";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Rocket, Dices, RotateCcw, CheckSquare } from "lucide-react";
+import { Rocket, Dices, RotateCcw, CheckSquare, Target } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 
 export default function Home() {
   const {
@@ -26,6 +27,8 @@ export default function Home() {
   }
 
   const isSetupPhase = gameState.phase === 'setup';
+
+  const attacksRemaining = gameState.turn === 'human' ? gameState.attacksRemaining : gameState.ai.attacks;
 
   return (
     <div className="min-h-screen bg-background text-foreground p-4 sm:p-6 lg:p-8 flex flex-col items-center">
@@ -52,7 +55,8 @@ export default function Home() {
             <CardContent>
               <GameBoard
                 board={gameState.player.board}
-                onCellClick={(row, col) => handleCellClick(row, col)}
+                ships={gameState.player.identifiedShips}
+                onCellClick={(row, col) => handleCellClick(row, col, 'player')}
                 isPlayerBoard={true}
               />
             </CardContent>
@@ -64,7 +68,8 @@ export default function Home() {
             <CardContent>
               <GameBoard
                 board={gameState.ai.board}
-                onCellClick={(row, col) => handleCellClick(row, col)}
+                ships={gameState.ai.identifiedShips}
+                onCellClick={(row, col) => handleCellClick(row, col, 'ai')}
                 isPlayerBoard={false}
               />
             </CardContent>
@@ -96,8 +101,14 @@ export default function Home() {
                 <>
                   <div className="text-center p-4 rounded-lg bg-secondary">
                     <p className="text-lg font-semibold font-headline">
-                      {gameState.turn === "human" ? "Your Turn" : "Enemy's Turn"}
+                      {gameState.turn === "human" ? "Your Turn" : `Enemy's Turn (${gameState.ai.attacks} attacks)`}
                     </p>
+                     {gameState.turn === 'human' && (
+                        <div className="flex items-center justify-center gap-2 mt-2">
+                            <Target className="w-5 h-5 text-accent"/>
+                            <p className="text-xl font-bold">{attacksRemaining} Attacks Remaining</p>
+                        </div>
+                    )}
                     <p className="text-muted-foreground mt-1 h-5">
                       {gameState.message}
                     </p>
@@ -135,6 +146,13 @@ export default function Home() {
                  <div className="bg-secondary p-2 rounded-md col-span-2">
                     <p className="text-sm text-muted-foreground">Fleet Points</p>
                     <p className="font-semibold">{gameState.player.points} / {gameState.settings.initialPoints}</p>
+                </div>
+                 <div className="bg-secondary p-2 rounded-md col-span-2">
+                    <p className="text-sm text-muted-foreground">Player Attacks</p>
+                    <div className="flex justify-center items-center gap-2">
+                        <Target className="w-4 h-4 text-accent" />
+                        <p className="font-semibold">{gameState.player.attacks}</p>
+                    </div>
                 </div>
               </div>
             </CardContent>

@@ -32,6 +32,7 @@ export type CellState = {
   isHit: boolean;
   isMiss: boolean;
   animation?: "hit" | "miss";
+  repairTurnsLeft?: number;
 };
 
 export type Board = CellState[][];
@@ -46,11 +47,22 @@ export interface GameSettings {
     initialPoints: number;
 }
 
+export interface IdentifiedShip {
+    id: number;
+    cells: { row: number, col: number }[];
+    isSunk: boolean;
+    weaponCount: number;
+    ammoCount: number;
+    medicalCount: number;
+}
+
 export interface PlayerState {
     board: Board;
     points: number;
     totalPoints: number;
     ships: { type: CellType; count: number }[];
+    attacks: number;
+    identifiedShips: IdentifiedShip[];
 }
 
 export interface GameState {
@@ -76,4 +88,6 @@ export interface GameState {
     col: number;
     result: 'hit' | 'miss';
   } | null;
+  attacksRemaining: number;
+  turnNumber: number;
 }
