@@ -207,23 +207,25 @@ export const useNebulaClash = () => {
             let newBoard = JSON.parse(JSON.stringify(playerState.board));
             let newShips = identifyShips(newBoard);
 
-            if (prev.turnNumber > 0 && prev.turnNumber % 3 === 0) {
-                newShips.forEach(ship => {
-                    if (ship.isSunk || ship.medicalCount === 0) return;
+            newShips.forEach(ship => {
+              if (ship.isSunk) return;
 
-                    let repairsMade = 0;
-                    const damagedCells = ship.cells
-                        .map(c => ({ ...c, cell: newBoard[c.row][c.col] }))
-                        .filter(c => c.cell.isHit && !c.cell.repairTurnsLeft);
+              // Repair logic
+              if (prev.turnNumber > 0 && prev.turnNumber % 3 === 0) {
+                let repairsToMake = ship.medicalCount;
+                const damagedCells = ship.cells
+                    .map(c => ({ ...c, cell: newBoard[c.row][c.col] }))
+                    .filter(c => c.cell.isHit && !c.cell.repairTurnsLeft);
+                
+                for (const cellToRepair of damagedCells) {
+                    if (repairsToMake <= 0) break;
+                    newBoard[cellToRepair.row][cellToRepair.col].repairTurnsLeft = 3;
+                    repairsToMake--;
+                }
+              }
+            });
 
-                    for (const cellToRepair of damagedCells) {
-                        if (repairsMade >= ship.medicalCount) break;
-                        newBoard[cellToRepair.row][cellToRepair.col].repairTurnsLeft = 3;
-                        repairsMade++;
-                    }
-                });
-            }
-
+            // Decrement repair timers
             for (const row of newBoard) {
                 for (const cell of row) {
                     if (cell.repairTurnsLeft && cell.repairTurnsLeft > 0) {
@@ -261,6 +263,92 @@ export const useNebulaClash = () => {
         }
     });
   }, [calculateAttacks]);
+
+  const getSmartMove = useCallback(async (board: Board, size: number, aiMemory: GameState['aiMemory'], difficulty: Difficulty) => {
+    let targets = [...aiMemory.potentialTargets];
+
+    if (difficulty !== 'easy' && aiMemory.searchAndDestroy && aiMemory.lastHit) {
+      const { row, col } = aiMemory.lastHit;
+      const directions = [
+        { r: -1, c: 0, d: 'up' }, { r: 1, c: 0, d: 'down' },
+        { r: 0, c: -1, d: 'left' }, { r: 0, c: 1, d: 'right' }
+      ];
+
+      if (aiMemory.huntDirection) {
+        const dir = directions.find(d => d.d === aiMemory.huntDirection)!;
+        let nextR = row + dir.r;
+        let nextC = col + dir.c;
+        while (nextR >= 0 && nextR < size && nextC >= 0 && nextC < size) {
+          if (!board[nextR][nextC].isHit && !board[nextR][nextC].isMiss) {
+            return { move: { row: nextR, col: nextC }, updatedTargets: targets };
+          }
+          if (board[nextR][nextC].isMiss) break;
+          nextR += dir.r;
+          nextC += dir.c;
+        }
+      }
+      for (const dir of directions) {
+        const nextR = row + dir.r;
+        const nextC = col + dir.c;
+        if (nextR >= 0 && nextR < size && nextC >= 0 && nextC < size && !board[nextR][nextC].isHit && !board[nextR][nextC].isMiss) {
+          targets.unshift({ row: nextR, col: nextC });
+        }
+      }
+    }
+
+    while (targets.length > 0) {
+      const move = targets.shift();
+      if (move && !board[move.row][move.col].isHit && !board[move.row][move.col].isMiss) {
+        return { move, updatedTargets: targets };
+      }
+    }
+
+    const allPossible: { row: number; col: number }[] = [];
+    const checkerboardPossible: { row: number; col: number }[] = [];
+    for (let r = 0; r < size; r++) {
+      for (let c = 0; c < size; c++) {
+        if (!board[r][c].isHit && !board[r][c].isMiss) {
+          allPossible.push({ row: r, col: c });
+          if ((r + c) % (difficulty === 'hard' ? 1 : 2) === (gameState.turnNumber % 2)) {
+             checkerboardPossible.push({ row: r, col: c });
+          }
+        }
+      }
+    }
+    
+    if (difficulty === 'hard' && allPossible.length > 0) {
+      let bestMove = allPossible[Math.floor(Math.random() * allPossible.length)];
+      let highestValue = -1;
+
+      // Make one call for a few random potential moves to not get rate limited.
+      const movesToEvaluate = allPossible.sort(() => 0.5 - Math.random()).slice(0, 5);
+      for(const move of movesToEvaluate) {
+        try {
+            const evaluation = await evaluateMove({
+                boardState: JSON.stringify(board),
+                move: `${String.fromCharCode(65 + move.row)}${move.col + 1}`,
+                opponentBoard: "Unknown" // We don't need this for the AI's turn
+            });
+            const value = (evaluation.isHighValue ? 1 : 0) + Math.random() * 0.1; // Add noise
+            if(value > highestValue){
+                highestValue = value;
+                bestMove = move;
+            }
+        } catch (e) {
+            // Rate limit or other error, fallback to random
+        }
+      }
+      return { move: bestMove, updatedTargets: [] };
+    }
+    
+    const targetList = checkerboardPossible.length > 0 ? checkerboardPossible : allPossible;
+    if (targetList.length > 0) {
+      const move = targetList[Math.floor(Math.random() * targetList.length)];
+      return { move, updatedTargets: [] };
+    }
+
+    return { move: null, updatedTargets: [] };
+  }, [gameState.turnNumber]);
 
   const handleAttack = useCallback((attacker: Player, row: number, col: number): boolean => {
     let wasValidAttack = false;
@@ -370,107 +458,31 @@ export const useNebulaClash = () => {
     return wasValidAttack;
   }, [toast, endTurn, calculateAttacks, checkWinner]);
   
-  const getSmartMove = useCallback(async (board: Board, size: number, aiMemory: GameState['aiMemory'], difficulty: Difficulty) => {
-    let targets = [...aiMemory.potentialTargets];
-
-    if (difficulty !== 'easy' && aiMemory.searchAndDestroy && aiMemory.lastHit) {
-      const { row, col } = aiMemory.lastHit;
-      const directions = [
-        { r: -1, c: 0, d: 'up' }, { r: 1, c: 0, d: 'down' },
-        { r: 0, c: -1, d: 'left' }, { r: 0, c: 1, d: 'right' }
-      ];
-
-      if (aiMemory.huntDirection) {
-        const dir = directions.find(d => d.d === aiMemory.huntDirection)!;
-        let nextR = row + dir.r;
-        let nextC = col + dir.c;
-        while (nextR >= 0 && nextR < size && nextC >= 0 && nextC < size) {
-          if (!board[nextR][nextC].isHit && !board[nextR][nextC].isMiss) {
-            return { move: { row: nextR, col: nextC }, updatedTargets: targets };
-          }
-          if (board[nextR][nextC].isMiss) break;
-          nextR += dir.r;
-          nextC += dir.c;
-        }
-      }
-      for (const dir of directions) {
-        const nextR = row + dir.r;
-        const nextC = col + dir.c;
-        if (nextR >= 0 && nextR < size && nextC >= 0 && nextC < size && !board[nextR][nextC].isHit && !board[nextR][nextC].isMiss) {
-          targets.unshift({ row: nextR, col: nextC });
-        }
-      }
-    }
-
-    while (targets.length > 0) {
-      const move = targets.shift();
-      if (move && !board[move.row][move.col].isHit && !board[move.row][move.col].isMiss) {
-        return { move, updatedTargets: targets };
-      }
-    }
-
-    const allPossible: { row: number; col: number }[] = [];
-    const checkerboardPossible: { row: number; col: number }[] = [];
-    for (let r = 0; r < size; r++) {
-      for (let c = 0; c < size; c++) {
-        if (!board[r][c].isHit && !board[r][c].isMiss) {
-          allPossible.push({ row: r, col: c });
-          if ((r + c) % (difficulty === 'hard' ? 1 : 2) === (gameState.turnNumber % 2)) {
-             checkerboardPossible.push({ row: r, col: c });
-          }
-        }
-      }
-    }
-    
-    if (difficulty === 'hard' && allPossible.length > 0) {
-        const move = allPossible[Math.floor(Math.random() * allPossible.length)];
-        try {
-            const evaluation = await evaluateMove({
-                boardState: JSON.stringify(board),
-                move: `${String.fromCharCode(65 + move.row)}${move.col + 1}`,
-                opponentBoard: "Unknown"
-            });
-            if(evaluation.isHighValue){
-                return { move, updatedTargets: [] };
-            }
-        } catch (e) {
-            // Rate limit or other error, fallback to random
-        }
-    }
-    
-    const targetList = checkerboardPossible.length > 0 ? checkerboardPossible : allPossible;
-    if (targetList.length > 0) {
-      const move = targetList[Math.floor(Math.random() * targetList.length)];
-      return { move, updatedTargets: [] };
-    }
-
-    return { move: null, updatedTargets: [] };
-  }, [gameState.turnNumber]);
-  
   const handleAIturn = useCallback(async () => {
-    setGameState(prev => ({...prev, message: "AI is thinking..."}));
-    await new Promise(resolve => setTimeout(resolve, 500)); 
+      setGameState(prev => ({ ...prev, message: "AI is thinking..." }));
 
-    let attacksToMake = gameState.ai.attacks;
-    
-    while(attacksToMake > 0) {
-        const { settings, player: playerState, aiMemory } = gameState;
-        const { board, boardSize } = { board: playerState.board, boardSize: settings.boardSize };
-        const { move } = await getSmartMove(board, boardSize, aiMemory, settings.difficulty);
+      let attacksMade = 0;
+      let availableAttacks = gameState.ai.attacks;
 
-        if (move) {
-            const isValid = handleAttack("ai", move.row, move.col);
-            if (isValid) {
-                attacksToMake--;
-            }
-        } else {
-            // No more moves available
-            break;
-        }
-        await new Promise(resolve => setTimeout(resolve, 1000));
-    }
-    
-    endTurn();
+      while (attacksMade < availableAttacks) {
+          const { settings, player: playerState, aiMemory } = gameState;
+          const { board, boardSize } = { board: playerState.board, boardSize: settings.boardSize };
+          
+          await new Promise(resolve => setTimeout(resolve, 500)); 
+          const { move } = await getSmartMove(board, boardSize, aiMemory, settings.difficulty);
+
+          if (move) {
+              const wasValid = handleAttack("ai", move.row, move.col);
+              if (wasValid) {
+                attacksMade++;
+              }
+          } else {
+              break; 
+          }
+          await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+
+      endTurn();
   }, [gameState, getSmartMove, handleAttack, endTurn]);
   
   const placeShipCell = useCallback((row: number, col: number) => {
@@ -502,38 +514,102 @@ export const useNebulaClash = () => {
   }, [toast, calculateAttacks]);
   
   const placeAllShipsRandomly = useCallback((playerState: PlayerState, boardSize: BoardSize) => {
-    let newState = { ...playerState, board: createEmptyBoard(boardSize), points: getPointsForBoardSize(boardSize) };
-    newState.ships.forEach(s => s.count = 0);
+    let newState = { 
+        ...playerState, 
+        board: createEmptyBoard(boardSize), 
+        points: getPointsForBoardSize(boardSize),
+        ships: [
+            { type: CellType.Simple, count: 0 },
+            { type: CellType.Weapon, count: 0 },
+            { type: CellType.Ammo, count: 0 },
+            { type: CellType.Medical, count: 0 },
+        ],
+    };
+    
+    const getNeighbors = (r: number, c: number, bSize: number) => {
+        const neighbors = [];
+        if (r > 0) neighbors.push({ row: r - 1, col: c });
+        if (r < bSize - 1) neighbors.push({ row: r + 1, col: c });
+        if (c > 0) neighbors.push({ row: r, col: c - 1 });
+        if (c < bSize - 1) neighbors.push({ row: r, col: c + 1 });
+        return neighbors;
+    };
+    
+    let attempts = 0;
+    while (newState.points > SHIP_CELL_POINTS[CellType.Simple] && attempts < 100) {
+        attempts++;
+        const shipSize = Math.floor(Math.random() * 8) + 3; // 3-10 cells
+        const shipPoints = Math.min(newState.points, shipSize * 4); // Budget for this ship
+        
+        let shipParts: { type: CellType, cost: number }[] = [];
+        let currentShipPoints = 0;
 
-    const cellTypes = Object.values(CellType);
+        // Ensure at least one weapon and one ammo if possible
+        if (shipPoints >= SHIP_CELL_POINTS[CellType.Weapon] + SHIP_CELL_POINTS[CellType.Ammo]) {
+            shipParts.push({ type: CellType.Weapon, cost: SHIP_CELL_POINTS[CellType.Weapon] });
+            currentShipPoints += SHIP_CELL_POINTS[CellType.Weapon];
+            shipParts.push({ type: CellType.Ammo, cost: SHIP_CELL_POINTS[CellType.Ammo] });
+            currentShipPoints += SHIP_CELL_POINTS[CellType.Ammo];
+        }
+        
+        while(currentShipPoints < shipPoints) {
+            const availableTypes = Object.values(CellType).filter(t => SHIP_CELL_POINTS[t] <= shipPoints - currentShipPoints);
+            if(availableTypes.length === 0) break;
+            const type = availableTypes[Math.floor(Math.random() * availableTypes.length)];
+            shipParts.push({ type, cost: SHIP_CELL_POINTS[type] });
+            currentShipPoints += SHIP_CELL_POINTS[type];
+        }
 
-    while (newState.points > 0) {
-        const shipType = cellTypes[Math.floor(Math.random() * cellTypes.length)];
-        const cost = SHIP_CELL_POINTS[shipType];
+        let placementAttempts = 0;
+        let placedSuccessfully = false;
+        while(placementAttempts < 50 && !placedSuccessfully) {
+            placementAttempts++;
+            const startRow = Math.floor(Math.random() * boardSize);
+            const startCol = Math.floor(Math.random() * boardSize);
 
-        if (newState.points >= cost) {
-            let placed = false;
-            let attempts = 0;
-            while(!placed && attempts < boardSize * boardSize) {
-                const row = Math.floor(Math.random() * boardSize);
-                const col = Math.floor(Math.random() * boardSize);
-                if (!newState.board[row][col].ship) {
-                    newState.board[row][col].ship = { type: shipType, health: 1 };
-                    newState.points -= cost;
-                    const shipIndex = newState.ships.findIndex(s => s.type === shipType);
-                    newState.ships[shipIndex].count++;
-                    placed = true;
+            if (!newState.board[startRow][startCol].ship) {
+                let currentShipCells: {row: number, col: number}[] = [];
+                let frontier = [{row: startRow, col: startCol}];
+                let tempBoard = JSON.parse(JSON.stringify(newState.board));
+
+                for (const part of shipParts) {
+                    if (frontier.length === 0) break;
+                    
+                    const randomIndex = Math.floor(Math.random() * frontier.length);
+                    const { row, col } = frontier.splice(randomIndex, 1)[0];
+
+                    if(!tempBoard[row][col].ship) {
+                        tempBoard[row][col].ship = { type: part.type, health: 1 };
+                        currentShipCells.push({row, col});
+                        
+                        getNeighbors(row, col, boardSize)
+                          .filter(n => !tempBoard[n.row][n.col].ship && !frontier.some(f => f.row === n.row && f.col === n.col))
+                          .forEach(n => frontier.push(n));
+                    } else {
+                        // try to place this part again
+                        shipParts.push(part);
+                    }
                 }
-                attempts++;
-            }
-            if(attempts >= boardSize * boardSize) break; 
-        } else {
-            const affordableTypes = cellTypes.filter(t => SHIP_CELL_POINTS[t] <= newState.points);
-            if (affordableTypes.length === 0) {
-                break; 
+                
+                if (currentShipCells.length >= shipParts.length * 0.8) { // successfully placed most parts
+                    newState.board = tempBoard;
+                    let spentPoints = 0;
+                    currentShipCells.forEach(({row, col}) => {
+                        const cell = newState.board[row][col];
+                        if (cell.ship) {
+                            const cost = SHIP_CELL_POINTS[cell.ship.type];
+                            spentPoints += cost;
+                            const shipIndex = newState.ships.findIndex(s => s.type === cell.ship!.type);
+                            newState.ships[shipIndex].count++;
+                        }
+                    });
+                    newState.points -= spentPoints;
+                    placedSuccessfully = true;
+                }
             }
         }
     }
+
     newState.identifiedShips = identifyShips(newState.board);
     newState.attacks = calculateAttacks(newState.identifiedShips);
     return newState;
