@@ -1,3 +1,4 @@
+
 export type Player = "human" | "ai";
 
 export enum CellType {
@@ -53,4 +54,10 @@ export interface GameState {
   message: string;
   selectedCellType: CellType | null;
   placingShips: boolean;
+  aiMemory: {
+    lastHit: { row: number; col: number } | null;
+    huntDirection: 'up' | 'down' | 'left' | 'right' | null;
+  };
 }
+
+    

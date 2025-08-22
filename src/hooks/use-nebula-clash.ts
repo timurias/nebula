@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
@@ -28,6 +29,10 @@ const getInitialState = (): GameState => ({
   placingShips: false,
   player: createEmptyPlayerState(10),
   ai: createEmptyPlayerState(10),
+  aiMemory: {
+    lastHit: null,
+    huntDirection: null,
+  }
 });
 
 function createEmptyBoard(size: BoardSize): Board {
@@ -135,10 +140,43 @@ export const useNebulaClash = () => {
     });
   }, []);
 
+  const getSmartMove = (playerBoard: Board, boardSize: number, lastHit: {row: number, col: number} | null) => {
+    const possibleMoves: { row: number; col: number }[] = [];
+    if(lastHit) {
+      // search adjacent cells
+      const {row, col} = lastHit;
+      const adjacent = [
+        {row: row - 1, col}, {row: row + 1, col},
+        {row, col: col - 1}, {row, col: col + 1}
+      ];
+      for(const move of adjacent) {
+        if(move.row >=0 && move.row < boardSize && move.col >= 0 && move.col < boardSize && !playerBoard[move.row][move.col].isHit && !playerBoard[move.row][move.col].isMiss) {
+          possibleMoves.push(move);
+        }
+      }
+    }
+
+    if(possibleMoves.length > 0) {
+      return possibleMoves[Math.floor(Math.random() * possibleMoves.length)];
+    }
+
+    // fallback to random if no smart moves
+    const allPossible : { row: number; col: number }[] = [];
+    for (let r = 0; r < boardSize; r++) {
+      for (let c = 0; c < boardSize; c++) {
+        if (!playerBoard[r][c].isHit && !playerBoard[r][c].isMiss) {
+          allPossible.push({ row: r, col: c });
+        }
+      }
+    }
+    if (allPossible.length === 0) return null;
+    return allPossible[Math.floor(Math.random() * allPossible.length)];
+  }
+
   const handleAIturn = useCallback(async () => {
     setGameState(prev => ({...prev, message: "AI is thinking..."}));
 
-    const { settings, ai: aiState, player: playerState } = gameState;
+    const { settings, ai: aiState, player: playerState, aiMemory } = gameState;
     const possibleMoves: { row: number; col: number }[] = [];
     for (let r = 0; r < settings.boardSize; r++) {
       for (let c = 0; c < settings.boardSize; c++) {
@@ -150,41 +188,36 @@ export const useNebulaClash = () => {
 
     if (possibleMoves.length === 0) return;
 
-    let move: { row: number; col: number };
+    let move: { row: number; col: number } | null;
 
     if (settings.difficulty === 'easy') {
         move = possibleMoves[Math.floor(Math.random() * possibleMoves.length)];
-    } else {
-        // Medium/Hard logic
-        const candidates = possibleMoves.sort(() => 0.5 - Math.random()).slice(0, 5);
-        const evaluations = await Promise.all(candidates.map(async m => {
-            const boardState = JSON.stringify(playerState.board.map(r => r.map(c => c.ship ? 'S' : 'E')));
-            const moveStr = `${String.fromCharCode(65 + m.row)}${m.col + 1}`;
+    } else { // medium and hard logic
+        move = getSmartMove(playerState.board, settings.boardSize, aiMemory.lastHit);
+
+        // For 'hard' difficulty, we can enhance with a single LLM call for a strategic check
+        if (settings.difficulty === 'hard' && move) {
+            const boardState = JSON.stringify(playerState.board.map(r => r.map(c => c.isHit ? 'H' : (c.isMiss ? 'M' : 'E'))));
+            const moveStr = `${String.fromCharCode(65 + move.row)}${move.col + 1}`;
             try {
-                const res = await evaluateMove({ boardState, move: moveStr, opponentBoard: "N/A"});
-                return { move: m, isHighValue: res.isHighValue };
+                const res = await evaluateMove({ boardState, move: moveStr, opponentBoard: "N/A" });
+                // The LLM can double-check our choice. If it's not a high-value move, we can try another random one.
+                // This is a simple integration, a more complex one could ask the LLM for the best move directly.
+                if (!res.isHighValue) {
+                   const randomMove = possibleMoves[Math.floor(Math.random() * possibleMoves.length)];
+                   move = randomMove;
+                }
             } catch (e) {
-                console.error("AI evaluation failed", e);
-                return { move: m, isHighValue: false }; // fallback
+                console.error("AI evaluation failed, proceeding with smart move", e);
             }
-        }));
-
-        const highValueMoves = evaluations.filter(e => e.isHighValue);
-        if (highValueMoves.length > 0) {
-            move = highValueMoves[Math.floor(Math.random() * highValueMoves.length)].move;
-        } else {
-            move = candidates[0];
-        }
-
-        if (settings.difficulty === 'hard' && highValueMoves.length > 0) {
-            // Always pick best option if hard
-            move = highValueMoves[0].move;
         }
     }
 
-    setTimeout(() => {
-        handleAttack("ai", move.row, move.col);
-    }, 1000);
+    if(move) {
+      setTimeout(() => {
+          handleAttack("ai", move!.row, move!.col);
+      }, 1000);
+    }
 
   }, [gameState]);
 
@@ -215,7 +248,7 @@ export const useNebulaClash = () => {
           const targetPlayerKey = isHumanAttack ? 'ai' : 'player';
           const targetState = prev[targetPlayerKey];
 
-          if (!targetState) return prev; // Should not happen with correct keys
+          if (!targetState) return prev; 
 
           const newBoard = JSON.parse(JSON.stringify(targetState.board));
           const cell = newBoard[row][col];
@@ -238,6 +271,7 @@ export const useNebulaClash = () => {
 
           setTimeout(() => {
               setGameState(current => {
+                    let newAiMemory = {...current.aiMemory};
                     const currentTargetState = current[targetPlayerKey];
                     const board = JSON.parse(JSON.stringify(currentTargetState.board));
                     const cell = board[row][col];
@@ -247,9 +281,15 @@ export const useNebulaClash = () => {
                         cell.isHit = true;
                         message = `${attacker === "human" ? "You" : "AI"} scored a HIT!`;
                         toast({ title: "HIT!", description: `Direct impact at ${String.fromCharCode(65 + row)}${col + 1}.`, className: "bg-accent border-accent text-accent-foreground" });
+                        if(!isHumanAttack) {
+                          newAiMemory.lastHit = {row, col};
+                        }
                     } else {
                         cell.isMiss = true;
                         message = `${attacker === "human" ? "You" : "AI"} missed.`;
+                         if(!isHumanAttack) {
+                          newAiMemory.lastHit = null; // reset after a miss
+                        }
                     }
 
                     const winner = checkWinner(
@@ -272,6 +312,7 @@ export const useNebulaClash = () => {
                         [targetPlayerKey]: { ...currentTargetState, board },
                         turn: isHumanAttack ? 'ai' : 'human',
                         message,
+                        aiMemory: newAiMemory
                     };
                 });
           }, 750);
@@ -384,3 +425,5 @@ export const useNebulaClash = () => {
 
   return { gameState, startGame, selectCellType, handleCellClick, resetGame, placeShipsRandomly, isPlacingRandomly };
 };
+
+    
