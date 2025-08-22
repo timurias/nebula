@@ -33,36 +33,34 @@ const cellTypeIcons: Record<string, React.ElementType> = {
   [CellType.Energy]: IconEnergy,
 };
 
-const getBorderClasses = (row: number, col: number, ships: IdentifiedShip[]) => {
-  let shipIndex = -1;
-  for(let i=0; i<ships.length; i++) {
-    if(ships[i].cells.some(c => c.row === row && c.col === col)) {
-      shipIndex = i;
-      break;
-    }
-  }
+const getBorderClasses = (row: number, col: number, ships: IdentifiedShip[], board: Board) => {
+    const cell = board[row][col];
+    if (!cell.ship) return "";
 
-  if (shipIndex === -1) return "";
+    const shipId = cell.ship.shipId;
+    if (!shipId) return "";
 
-  const ship = ships[shipIndex];
-  const classes = [];
+    const ship = ships.find(s => s.id === shipId);
+    if (!ship) return "";
 
-  const hasNeighbor = (r: number, c: number) => ship.cells.some(cell => cell.row === r && cell.col === c);
+    const classes = [];
+    const hasNeighbor = (r: number, c: number) => 
+        r >= 0 && r < board.length && c >= 0 && c < board.length && board[r][c].ship?.shipId === shipId;
 
-  if (!hasNeighbor(row - 1, col)) classes.push("border-t-2 border-accent/70");
-  if (!hasNeighbor(row + 1, col)) classes.push("border-b-2 border-accent/70");
-  if (!hasNeighbor(row, col - 1)) classes.push("border-l-2 border-accent/70");
-  if (!hasNeighbor(row, col + 1)) classes.push("border-r-2 border-accent/70");
+    if (!hasNeighbor(row - 1, col)) classes.push("border-t-2 border-accent/70");
+    if (!hasNeighbor(row + 1, col)) classes.push("border-b-2 border-accent/70");
+    if (!hasNeighbor(row, col - 1)) classes.push("border-l-2 border-accent/70");
+    if (!hasNeighbor(row, col + 1)) classes.push("border-r-2 border-accent/70");
 
-  // Fix corners
-  if (!hasNeighbor(row - 1, col) && !hasNeighbor(row, col - 1)) classes.push("rounded-tl-lg");
-  if (!hasNeighbor(row - 1, col) && !hasNeighbor(row, col + 1)) classes.push("rounded-tr-lg");
-  if (!hasNeighbor(row + 1, col) && !hasNeighbor(row, col - 1)) classes.push("rounded-bl-lg");
-  if (!hasNeighbor(row + 1, col) && !hasNeighbor(row, col + 1)) classes.push("rounded-br-lg");
+    // Fix corners
+    if (!hasNeighbor(row - 1, col) && !hasNeighbor(row, col - 1)) classes.push("rounded-tl-lg");
+    if (!hasNeighbor(row - 1, col) && !hasNeighbor(row, col + 1)) classes.push("rounded-tr-lg");
+    if (!hasNeighbor(row + 1, col) && !hasNeighbor(row, col - 1)) classes.push("rounded-bl-lg");
+    if (!hasNeighbor(row + 1, col) && !hasNeighbor(row, col + 1)) classes.push("rounded-br-lg");
 
+    return classes.join(" ");
+};
 
-  return classes.join(" ");
-}
 
 const isResourceConsumer = (cellType: CellType) => {
     return cellType !== CellType.Simple && cellType !== CellType.Energy;
@@ -101,7 +99,7 @@ export default function GameBoard({ board, ships, onCellClick, isPlayerBoard, de
         {board.map((row, rowIndex) =>
           row.map((cell, colIndex) => {
             const Icon = cell.ship ? cellTypeIcons[cell.ship.type] : null;
-            const borderClasses = (isPlayerBoard || debug) && cell.ship ? getBorderClasses(rowIndex, colIndex, ships) : "";
+            const borderClasses = (isPlayerBoard || debug) && cell.ship ? getBorderClasses(rowIndex, colIndex, ships, board) : "";
             const isSelectedWeapon = isPlayerBoard && selectedWeaponId === cell.ship?.id;
             const isSelectedResource = isPlayerBoard && selectedResource?.row === rowIndex && selectedResource?.col === colIndex;
             
@@ -113,7 +111,7 @@ export default function GameBoard({ board, ships, onCellClick, isPlayerBoard, de
             let isEnergized = false;
             if(cell.ship && isResourceConsumer(cell.ship.type)) {
                 if(WEAPON_TYPES.includes(cell.ship.type)) {
-                    const spec = WEAPON_SPECS[cell.ship.type];
+                    const spec = WEAPON_SPECS[cell.ship.type as keyof typeof WEAPON_SPECS];
                     isEnergized = energySources >= spec.energyCost;
                 } else {
                     isEnergized = energySources >= 1;
@@ -213,7 +211,7 @@ export default function GameBoard({ board, ships, onCellClick, isPlayerBoard, de
                 } else if (!isEnergized && isResourceConsumer(cell.ship.type)) {
                     tooltipContent = "Not energized. Click an energy cell, then this cell to power it.";
                 } else if (WEAPON_TYPES.includes(cell.ship.type)) {
-                    const spec = WEAPON_SPECS[cell.ship.type];
+                    const spec = WEAPON_SPECS[cell.ship.type as keyof typeof WEAPON_SPECS];
                     tooltipContent = `Ammo: ${cell.ship.ammoCharge || 0}/${spec.ammoCost}. Energy: ${energySources}/${spec.energyCost}. Click an ammo cell, then this cell to charge it.`;
                 } else if (cell.ship.type === CellType.Energy && !cell.ship.usedThisTurn) {
                     tooltipContent = "Energy producer. Click to select, then click a component to power it.";

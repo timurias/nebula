@@ -121,9 +121,11 @@ export default function Home() {
                     <Badge variant={isReady ? 'default' : 'secondary'}>{isReady ? 'Ready' : 'Charging'}</Badge>
                    </div>
                  </div>
-                 <Progress value={(charge / spec.ammoCost) * 100} className="my-2" />
-                 <p className="text-sm text-muted-foreground text-center mb-2">Charge: {charge} / {spec.ammoCost}</p>
-                 
+                 <Progress value={(charge / spec.ammoCost) * 100} className="my-2 h-2" />
+                 <div className="flex justify-between text-sm text-muted-foreground mt-1">
+                    <span>Ammo: {charge} / {spec.ammoCost}</span>
+                    <span>Energy: {energySources} / {spec.energyCost}</span>
+                 </div>
               </Card>
             )
           })}
@@ -241,5 +243,3 @@ export default function Home() {
     </div>
   );
 }
-
-    
