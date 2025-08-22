@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
@@ -262,7 +261,7 @@ export const useNebulaClash = () => {
             turnNumber: nextTurn === 'human' ? prev.turnNumber + 1 : prev.turnNumber
         }
     });
-  }, [calculateAttacks]);
+  }, [calculateAttacks, gameState.turnNumber, gameState.turn]);
 
   const getSmartMove = useCallback(async (board: Board, size: number, aiMemory: GameState['aiMemory'], difficulty: Difficulty) => {
     let targets = [...aiMemory.potentialTargets];
@@ -349,7 +348,7 @@ export const useNebulaClash = () => {
 
     return { move: null, updatedTargets: [] };
   }, [gameState.turnNumber]);
-
+  
   const handleAttack = useCallback((attacker: Player, row: number, col: number): boolean => {
     let wasValidAttack = false;
     setGameState(prev => {
@@ -459,30 +458,50 @@ export const useNebulaClash = () => {
   }, [toast, endTurn, calculateAttacks, checkWinner]);
   
   const handleAIturn = useCallback(async () => {
-      setGameState(prev => ({ ...prev, message: "AI is thinking..." }));
+    setGameState(prev => ({ ...prev, message: "AI is thinking..." }));
 
-      let attacksMade = 0;
-      let availableAttacks = gameState.ai.attacks;
+    let currentGameState = gameState;
+    let availableAttacks = currentGameState.ai.attacks;
+    let attacksMade = 0;
 
-      while (attacksMade < availableAttacks) {
-          const { settings, player: playerState, aiMemory } = gameState;
-          const { board, boardSize } = { board: playerState.board, boardSize: settings.boardSize };
-          
-          await new Promise(resolve => setTimeout(resolve, 500)); 
-          const { move } = await getSmartMove(board, boardSize, aiMemory, settings.difficulty);
+    while (attacksMade < availableAttacks) {
+      const { settings, player: playerState, aiMemory } = currentGameState;
+      const { board } = playerState;
+      
+      await new Promise(resolve => setTimeout(resolve, 500)); 
+      const { move } = await getSmartMove(board, settings.boardSize, aiMemory, settings.difficulty);
 
-          if (move) {
-              const wasValid = handleAttack("ai", move.row, move.col);
-              if (wasValid) {
-                attacksMade++;
+      if (move) {
+          const wasValid = handleAttack("ai", move.row, move.col);
+          if (wasValid) {
+            attacksMade++;
+            // Manually update the board state for the next smart move call in the loop
+            const newBoard = JSON.parse(JSON.stringify(currentGameState.player.board));
+            const cell = newBoard[move.row][move.col];
+            if(cell.ship) {
+              cell.isHit = true;
+            } else {
+              cell.isMiss = true;
+            }
+            currentGameState = {
+              ...currentGameState,
+              player: {
+                ...currentGameState.player,
+                board: newBoard,
+              },
+              aiMemory: {
+                ...currentGameState.aiMemory,
+                lastHit: cell.ship ? {row: move.row, col: move.col} : currentGameState.aiMemory.lastHit
               }
-          } else {
-              break; 
+            };
           }
-          await new Promise(resolve => setTimeout(resolve, 1000));
+      } else {
+          break; 
       }
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
 
-      endTurn();
+    endTurn();
   }, [gameState, getSmartMove, handleAttack, endTurn]);
   
   const placeShipCell = useCallback((row: number, col: number) => {
