@@ -137,6 +137,10 @@ export default function Home() {
 
   }
 
+  if (!gameState.player) {
+    return null; // or a loading spinner
+  }
+
   return (
     <div className="min-h-screen bg-background text-foreground p-4 sm:p-6 lg:p-8 flex flex-col items-center">
       <header className="w-full max-w-7xl flex justify-between items-center mb-6">
