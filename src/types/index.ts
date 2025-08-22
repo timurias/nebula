@@ -15,6 +15,13 @@ export const SHIP_CELL_HEALTH: Record<CellType, number> = {
   [CellType.Medical]: 2,
 };
 
+export const SHIP_CELL_POINTS: Record<CellType, number> = {
+    [CellType.Simple]: 1,
+    [CellType.Weapon]: 6,
+    [CellType.Ammo]: 4,
+    [CellType.Medical]: 3,
+};
+
 export interface ShipCell {
   type: CellType;
   health: number;
@@ -36,12 +43,14 @@ export type BoardSize = 5 | 10 | 15;
 export interface GameSettings {
     boardSize: BoardSize;
     difficulty: Difficulty;
+    initialPoints: number;
 }
 
 export interface PlayerState {
     board: Board;
-    ships: { type: CellType, count: number, total: number }[];
-    ammo: number;
+    points: number;
+    totalPoints: number;
+    ships: { type: CellType; count: number }[];
 }
 
 export interface GameState {
@@ -58,6 +67,8 @@ export interface GameState {
     lastHit: { row: number; col: number } | null;
     huntDirection: 'up' | 'down' | 'left' | 'right' | null;
     potentialTargets: { row: number; col: number }[];
+    searchAndDestroy: boolean;
+    shipGrid: (boolean | null)[][];
   };
   lastAttack: {
     attacker: Player;

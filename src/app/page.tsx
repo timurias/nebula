@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useNebulaClash } from "@/hooks/use-nebula-clash";
@@ -6,7 +7,7 @@ import SetupDialog from "@/components/setup-dialog";
 import ShipPlacementPanel from "@/components/ship-placement-panel";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Rocket, Dices, RotateCcw } from "lucide-react";
+import { Rocket, Dices, RotateCcw, CheckSquare } from "lucide-react";
 
 export default function Home() {
   const {
@@ -17,6 +18,7 @@ export default function Home() {
     resetGame,
     placeShipsRandomly,
     isPlacingRandomly,
+    finishPlacing,
   } = useNebulaClash();
 
   if (gameState.phase === "setup") {
@@ -104,13 +106,17 @@ export default function Home() {
                   {gameState.placingShips && (
                     <div className="flex flex-col gap-4">
                       <ShipPlacementPanel
-                        availableCells={gameState.player.ships}
+                        playerState={gameState.player}
                         selectedCellType={gameState.selectedCellType}
                         onSelectCellType={selectCellType}
                       />
                        <Button onClick={placeShipsRandomly} disabled={isPlacingRandomly}>
                         <Dices className="mr-2 h-4 w-4" />
                         {isPlacingRandomly ? 'Placing...' : 'Place Randomly'}
+                      </Button>
+                      <Button onClick={finishPlacing} variant="default" className="bg-accent hover:bg-accent/90">
+                        <CheckSquare className="mr-2 h-4 w-4" />
+                        Finish Placing
                       </Button>
                     </div>
                   )}
@@ -125,6 +131,10 @@ export default function Home() {
                 <div className="bg-secondary p-2 rounded-md">
                     <p className="text-sm text-muted-foreground">Board Size</p>
                     <p className="font-semibold">{gameState.settings.boardSize}x{gameState.settings.boardSize}</p>
+                </div>
+                 <div className="bg-secondary p-2 rounded-md col-span-2">
+                    <p className="text-sm text-muted-foreground">Fleet Points</p>
+                    <p className="font-semibold">{gameState.player.points} / {gameState.settings.initialPoints}</p>
                 </div>
               </div>
             </CardContent>

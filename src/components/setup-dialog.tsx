@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState } from "react";
@@ -16,7 +17,7 @@ import type { BoardSize, Difficulty, GameSettings } from "@/types";
 import { Rocket } from "lucide-react";
 
 interface SetupDialogProps {
-  onStartGame: (settings: GameSettings) => void;
+  onStartGame: (settings: Omit<GameSettings, 'initialPoints'>) => void;
 }
 
 export default function SetupDialog({ onStartGame }: SetupDialogProps) {
@@ -49,15 +50,15 @@ export default function SetupDialog({ onStartGame }: SetupDialogProps) {
             >
               <div className="flex items-center space-x-2">
                 <RadioGroupItem value="5" id="b5" />
-                <Label htmlFor="b5">5x5</Label>
+                <Label htmlFor="b5">5x5 (20 Pts)</Label>
               </div>
               <div className="flex items-center space-x-2">
                 <RadioGroupItem value="10" id="b10" />
-                <Label htmlFor="b10">10x10</Label>
+                <Label htmlFor="b10">10x10 (50 Pts)</Label>
               </div>
               <div className="flex items-center space-x-2">
                 <RadioGroupItem value="15" id="b15" />
-                <Label htmlFor="b15">15x15</Label>
+                <Label htmlFor="b15">15x15 (100 Pts)</Label>
               </div>
             </RadioGroup>
           </div>
