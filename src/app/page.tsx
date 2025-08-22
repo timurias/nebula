@@ -49,7 +49,7 @@ export default function Home() {
             </CardHeader>
             <CardContent>
               <GameBoard
-                board={gameState.playerBoard}
+                board={gameState.player.board}
                 onCellClick={(row, col) => handleCellClick(row, col)}
                 isPlayerBoard={true}
               />
@@ -61,7 +61,7 @@ export default function Home() {
             </CardHeader>
             <CardContent>
               <GameBoard
-                board={gameState.aiBoard}
+                board={gameState.ai.board}
                 onCellClick={(row, col) => handleCellClick(row, col)}
                 isPlayerBoard={false}
               />
@@ -104,7 +104,7 @@ export default function Home() {
                   {gameState.placingShips && (
                     <div className="flex flex-col gap-4">
                       <ShipPlacementPanel
-                        availableCells={gameState.playerShips}
+                        availableCells={gameState.player.ships}
                         selectedCellType={gameState.selectedCellType}
                         onSelectCellType={selectCellType}
                       />
@@ -120,11 +120,11 @@ export default function Home() {
               <div className="grid grid-cols-2 gap-4 text-center">
                 <div className="bg-secondary p-2 rounded-md">
                     <p className="text-sm text-muted-foreground">Difficulty</p>
-                    <p className="font-semibold capitalize">{gameState.difficulty}</p>
+                    <p className="font-semibold capitalize">{gameState.settings.difficulty}</p>
                 </div>
                 <div className="bg-secondary p-2 rounded-md">
                     <p className="text-sm text-muted-foreground">Board Size</p>
-                    <p className="font-semibold">{gameState.boardSize}x{gameState.boardSize}</p>
+                    <p className="font-semibold">{gameState.settings.boardSize}x{gameState.settings.boardSize}</p>
                 </div>
               </div>
             </CardContent>
